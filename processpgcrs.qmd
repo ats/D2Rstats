@@ -587,7 +587,7 @@ if(modeIn(5, levelWeapon$modeString)) {
       geom_hline(yintercept = 1.0, color="#ffffff") +
       geom_quasirandom( varwidth = TRUE, width=.3, orientation = "x", alpha=.7) +
     facet_wrap(.~characterClass) +
-    theme_solarized_2(light=FALSE, base_family = "Gill Sans") +
+    theme_solarized_2(light=FALSE, base_family = font_family) +
     theme(legend.position = "none") +
     labs(title = glue::glue("PVP since {pvp_range}"),
          subtitle = glue::glue("{filterName}: Wins & Losses / Scaled by player score"),
@@ -600,7 +600,7 @@ if(modeIn(5, levelWeapon$modeString)) {
       geom_hline(yintercept = 1.0, color="#ffffff") +
       geom_quasirandom( varwidth = TRUE, width=.3, orientation = "x", alpha=.7) +
     facet_wrap(.~characterClass) +
-    theme_solarized_2(light=FALSE, base_family = "Gill Sans") +
+    theme_solarized_2(light=FALSE, base_family = font_family) +
     theme(legend.position = "none") +
     labs(title = glue::glue("Recent PVP history"),
          subtitle = glue::glue("{filterName}: Wins & Losses / Scaled by player score"),
@@ -614,7 +614,7 @@ if("Iron Banner" %in% pvp_games$displayProperties.name.x) {
       geom_hline(yintercept = 1.0, color="#ffffff") +
       geom_quasirandom( varwidth = TRUE, width=.3, orientation = "x", alpha=.7) +
     facet_wrap(lubridate::year(date)~., scales = "free_x") +
-    theme_solarized_2(light=FALSE, base_family = "Gill Sans") +
+    theme_solarized_2(light=FALSE, base_family = font_family) +
     theme(legend.position = "none") +
     labs(title = "Iron Banner",
          subtitle = glue("{filterName}: Wins & Losses / Scaled by player score"),
@@ -652,7 +652,7 @@ pvp_games |>
   ggplot(aes(x=date, y=as.numeric(kda), color=standing, size=score)) +
     geom_hline(yintercept = 1, color="white") +
     geom_quasirandom( varwidth = TRUE, width=.3, orientation = "x", alpha=.7) +
-  theme_solarized_2(light=FALSE, base_family = "Gill Sans") +
+  theme_solarized_2(light=FALSE, base_family = font_family) +
   theme(legend.position = "none") +
   labs(title = "Iron Banner #1, Season 21",
        subtitle = "Wins & Losses / Scaled by player score",

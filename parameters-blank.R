@@ -39,5 +39,7 @@ filterMode <- ""
 # 46: GM Nightfall
 #  5: All PVP
 
+# set some vars for cosmetics
+font_face = ""
 
 
