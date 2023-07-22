@@ -11,8 +11,12 @@ echo: false
 theme: flatly
 embed-resources: true
 ---
+```{r}
+source("parameters.R")
+```
 
-# Build PGCR data set
+
+# Build PGCR data set for `r filterName`
 
 ```{r}
 #| include: false
@@ -36,8 +40,6 @@ library(patchwork)
 
 tic("full") # for full run
 
-
-source("parameters.R")
 api_root <- "https://www.bungie.net/Platform"
 
 # set up path to find PCGRs
@@ -568,6 +570,7 @@ p1 <- weapon_treemap(levelWeapon, tier="Legendary", limit=100,
   weapon_barplot(levelWeapon, tier="Legendary", title = NULL, limit=7, 
                  ncol=3, text_size = 2) +
   plot_annotation(title="All Legendaries",
+                  subtitle=filterName,
                   caption="Built by D2Rstats",
                   theme = c(theme(plot.caption = element_text(size=4)),
                             theme(plot.title = element_text(size=22)))
@@ -579,6 +582,7 @@ p1 <- weapon_treemap(levelWeapon, tier="Exotic", limit=7) +
   weapon_barplot(levelWeapon, tier="Exotic", limit=7,
                  ncol=3, text_size = 2) +
   plot_annotation(title="All Exotics",
+                  subtitle=filterName,
                   caption="Built by D2Rstats",
                   theme = c(theme(plot.caption = element_text(size=4)),
                             theme(plot.title = element_text(size=22)))
@@ -590,6 +594,7 @@ p1 <- weapon_treemap(levelWeapon, mode=82, limit=25) +
   weapon_barplot(levelWeapon, mode=82, limit=5,
                  ncol=3, text_size = 2) +
   plot_annotation(title="All Dungeon Weapons",
+                  subtitle = filterName,
                   caption="Built by D2Rstats",
                   theme = c(theme(plot.caption = element_text(size=4)),
                             theme(plot.title = element_text(size=22)))
@@ -601,6 +606,7 @@ p1 <- weapon_treemap(levelWeapon, mode=5, limit=25) +
   weapon_barplot(levelWeapon, mode=5, limit=5,
                  ncol=3, text_size = 2) +
   plot_annotation(title="All PVP Weapons",
+                  subtitle = filterName,
                   caption="Built by D2Rstats",
                   theme = c(theme(plot.caption = element_text(size=4)),
                             theme(plot.title = element_text(size=22)))
@@ -662,7 +668,7 @@ if(modeIn(5, levelWeapon$modeString)) {
     theme_solarized_2(light=FALSE, base_family = "Gill Sans") +
     theme(legend.position = "none") +
     labs(title = glue::glue("PVP since {pvp_range}"),
-         subtitle = "Wins & Losses / Scaled by player score",
+         subtitle = glue::glue("{filterName}: Wins & Losses / Scaled by player score"),
          y = "KDA", x=NULL)
   
 if("Iron Banner" %in% pvp_games$displayProperties.name.x) {
@@ -676,7 +682,7 @@ if("Iron Banner" %in% pvp_games$displayProperties.name.x) {
     theme_solarized_2(light=FALSE, base_family = "Gill Sans") +
     theme(legend.position = "none") +
     labs(title = "Iron Banner",
-         subtitle = "Wins & Losses / Scaled by player score",
+         subtitle = glue("{filterName}: Wins & Losses / Scaled by player score"),
          y = "KDA", x=NULL)
 } # Iron Banner check
   
