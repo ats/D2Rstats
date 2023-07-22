@@ -640,6 +640,7 @@ weapon_treemap(levelWeapon, type="Scout Rifle", limit=100) +
 
 pvp1 <- NULL
 pvp2 <- NULL
+pvp3 <- NULL
 
 ## only try PVP stats if there are PVP games in the data
 if(modeIn(5, levelWeapon$modeString)) {
@@ -659,6 +660,7 @@ if(modeIn(5, levelWeapon$modeString)) {
   pvp_most_recent <- max(pvp_games$date)
   pvp_range <- lubridate::year(pvp_most_recent-365)
 
+  # this makes PVP history of at least one year
   pvp1 <- pvp_games |>
     filter(lubridate::year(date) >= pvp_range) |>
     ggplot(aes(x=date, y=as.numeric(kda), color=standing, size=score)) +
@@ -671,8 +673,21 @@ if(modeIn(5, levelWeapon$modeString)) {
          subtitle = glue::glue("{filterName}: Wins & Losses / Scaled by player score"),
          y = "KDA", x=NULL)
   
+    # PVP history of last 77 matches
+    pvp2 <- pvp_games |> ungroup() |>
+    slice_head(n=77) |> 
+    ggplot(aes(x=date, y=as.numeric(kda), color=standing, size=score)) +
+      geom_hline(yintercept = 1.0, color="#ffffff") +
+      geom_quasirandom( varwidth = TRUE, width=.3, orientation = "x", alpha=.7) +
+    facet_wrap(.~characterClass) +
+    theme_solarized_2(light=FALSE, base_family = "Gill Sans") +
+    theme(legend.position = "none") +
+    labs(title = glue::glue("Recent PVP history"),
+         subtitle = glue::glue("{filterName}: Wins & Losses / Scaled by player score"),
+         y = "KDA", x=NULL)
+    
 if("Iron Banner" %in% pvp_games$displayProperties.name.x) {
-  pvp2 <- pvp_games |>
+  pvp3 <- pvp_games |>
     filter(displayProperties.name.x == "Iron Banner") |>
     filter(lubridate::year(date) >= pvp_range) |>
     ggplot(aes(x=date, y=as.numeric(kda), color=standing, size=score)) +
@@ -693,6 +708,8 @@ if("Iron Banner" %in% pvp_games$displayProperties.name.x) {
 pvp1
 
 pvp2
+
+pvp3
 
 ```
 
