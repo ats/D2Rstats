@@ -1,0 +1,22 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+
+# Exclude downloaded pgcrs and generated output
+*pgcrs/
+*output/
+*data/
+parameters*.R
+
+# keep blank params file
+!parameters-blank.R
+# exclude manifest
+resources/*
+# exclude the built html files
+getpgcrs.html
+manifest.html
+processpgcrs.html
+README.html
+
+

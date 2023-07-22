@@ -1,0 +1,722 @@
+---
+title: "D2Rstats: Process PGCRs"
+toc: true
+toc-depth: 1
+format: html
+editor: visual
+editor_options: 
+  chunk_output_type: inline
+warning: false
+echo: false
+theme: flatly
+embed-resources: true
+---
+
+# Build PGCR data set
+
+```{r}
+#| include: false
+
+library(glue)
+library(httr2)
+library(foreach)
+library(tidyjson)
+library(tictoc)
+library(furrr)
+library(dplyr)
+library(tidyr)
+library(dbplyr)
+library(DBI)
+library(tibble)
+library(treemapify)
+library(ggplot2)
+library(ggthemes)
+library(ggbeeswarm)
+library(patchwork)
+
+tic("full") # for full run
+
+
+source("parameters.R")
+api_root <- "https://www.bungie.net/Platform"
+
+# set up path to find PCGRs
+pcgrPath <- glue("{membershipId}-pgcrs")
+toRead <- list.files(pcgrPath, full.names = TRUE, pattern="*.json")#[1:10] 
+
+
+```
+
+Reading json data for `r length(toRead)` files.
+
+```{r}
+#print(glue("reading json data for {length(toRead)} files"))
+tic("data read")
+sample <- toRead |> as_tibble()
+# you can take a smaller/different slice of the full data set
+# by restricting how much of toRead to use, e.g.,
+# sample <- tail(toRead, n=100) |> as_tibble()
+# sample <- slice_sample(n=3000) # random 3000 PGCRs
+tbljson <- sample$value |> as.tbl_json()
+toc()
+```
+
+## set filters
+
+Running using the following filter criteria:
+
+-   PGCRs \> date: **`r dateGE`**
+-   Gamertag: **`r filterName`**
+
+```{r}
+#| echo: false
+#| eval: false
+
+# deprecated in favor of building this all into parameters
+
+dateGE = "2017-09-06"             # date in YYYY-mm-dd
+                                  # will filter to activity date >= to this
+
+filterName <- ""                  # set gamer tag to filter;
+                                  # otherwise you'll get *all* player data
+filterMode <- ""                  # Example modes to filter for:
+                                  # 19: Iron Banner
+                                  #  4: Raid
+                                  # 82: Dungeon
+                                  # 46: GM Nightfall
+                                  #  5: All PVP
+
+```
+
+## Set up utility functions: `raise()` and `modeIn()`
+
+The first of these functions is used to simplify repeated calls to get nested data from a common parent node in the manifest. The second function is for checking whether a specific game mode is found within an activity entry.
+
+```{r}
+raise <- function(.data, unnest, label, displayValue = TRUE) {
+  # unnest is list element whose basic.displayValue field we will bring up
+  if (!is.data.frame(.data)) {
+        abort("`.data` must be a data frame.")
+  }
+  if (!is.logical(displayValue)) {
+    abort("`displayValue` must be a boolean; True to use the displayValue component, False to use the raw value.")
+  }
+  if (displayValue == TRUE) {
+    # default
+    unnest_wider(.data, unnest) |> 
+    unnest_wider(basic) |>
+    unnest_longer(displayValue, keep_empty = TRUE) |>
+    mutate("{{label}}" := displayValue) |>
+    select(-displayValue, -value)
+  } else {
+    # if displayValue is false, use `value` rather than `displayValue`
+    unnest_wider(.data, unnest) |> 
+    unnest_wider(basic) |>
+    unnest_auto(value) |>
+    mutate("{{label}}" := value) |>
+    select(-displayValue, -value)
+  }
+}
+
+# function to filter on activity types
+modeIn <- function(mode, modeString) {
+  mode %in% c(stringi::stri_split(modeString, fixed="|", simplify=TRUE))
+}
+
+
+```
+
+## Activity information
+
+Build a full `levelActivity` data set to allow for filtering by mode and date. This is the most high-level pull of data from the data and consists of single rows of per-activity information.
+
+```{r}
+#| include: false
+tic()
+tbljson |> unnest_wider(..JSON) |> select(period, activityDetails, entries) |>
+  # activity-level information
+  unnest_longer(period) |> unnest_auto(activityDetails) ->
+    temptbl
+
+  if(dateGE != "") {
+    temptbl |> filter(period >= dateGE) ->
+      temptbl
+  }
+
+  temptbl |>
+  unnest_auto(referenceId) |>
+  unnest_auto(directorActivityHash) |>
+  unnest_auto(instanceId) |>
+  unnest_auto(mode) |>
+  unnest_auto(modes) |>
+  unnest_auto(modes) ->
+  levelActivity
+
+# revise levelActivity to pivot modes to wider format -- avoid unnecessary rows
+# and enable the rowIn function
+
+levelActivity |> select(-mode) |> # remove unneeded single mode column
+  pivot_wider(values_from = modes, names_from = modes, names_prefix = "mode_") |>
+  unite("modeString", starts_with("mode_"), sep="|", remove = TRUE,
+        na.rm = TRUE) -> # |>
+  levelActivity
+
+  if (filterMode != "") {
+    levelActivity |>
+      rowwise() |>
+      filter(modeIn(filterMode, modeString)) ->
+      levelActivity
+  }
+
+toc()
+
+head(levelActivity)
+
+```
+
+Data at this point is filtered to any date filter set earlier.
+
+## Player performance data
+
+We build out per-player per-activity data now:
+
+-   Filter for focal gamertag if specified
+-   augment activity-level information with core player performance information
+-   this can add rows because it splits into character-per-activity information
+
+```{r}
+#| include: false
+tic()
+levelActivity |>
+  # character info block
+  unnest_longer(entries) |> # select(period, entries) |>
+  unnest_auto(entries) |>
+  unnest_auto(player) |>
+  unnest_auto(destinyUserInfo) |> 
+  unnest_auto(displayName) ->
+    levelPlayer
+
+  # quick break to filter on name if specified
+if(filterName != "") {
+    levelPlayer |> filter(displayName == filterName) ->
+    levelPlayer
+}
+
+# resume main data creation
+levelPlayer |>
+  unnest_auto(membershipId) |>
+  unnest_auto(characterClass) |>
+  unnest_auto(classHash) |>
+  unnest_auto(characterId) |>
+  #select(period, displayName, classHash, 
+  #       values, extended) |>
+  unnest_wider(values, names_sep = "_") |>
+  # performance block
+    raise("values_standing", standing) |>
+    raise(unnest="values_kills", kills) |> 
+    raise(unnest="values_deaths", deaths) |>
+    raise("values_killsDeathsRatio", kdr) |>
+    raise("values_killsDeathsAssists", kda) |>
+    raise("values_timePlayedSeconds", timePlayed, displayValue = FALSE) |>
+    raise("values_score", score) |>          
+    raise("values_teamScore", teamScore) -> #|>
+levelPlayer
+toc()
+
+head(levelPlayer)
+
+```
+
+```{r}
+#| echo: false
+#| include: false
+# find a specific player from levelPlayer
+levelPlayer |> filter(displayName=="") |> select(displayName, membershipId) |> unique()
+```
+
+## Additional kills data
+
+-   build on ability kills
+-   remove medals and supremacy information
+
+```{r}
+  # extended values
+tic()
+  levelPlayer |>
+  unnest_wider(extended) |>
+  unnest_wider(values) |>
+    raise("precisionKills", precision) |>
+    raise("weaponKillsGrenade", grenade) |>
+    raise("weaponKillsMelee", melee) |>
+    raise("weaponKillsSuper", super) |>
+    raise("weaponKillsAbility", ability) |>
+  select(-contains("medal")) |>
+  select(-contains("supremacy")) ->
+  ## !!
+  levelExtended 
+toc()  
+```
+
+## Weapon data
+
+-   add weapon information; this increases row count by one row per weapon per character in activity.
+
+```{r}
+  # weapon block
+  # extended opens up both `weapons` and `values` (additional 
+  #   activity-level kills information)
+tic()
+levelExtended |>
+  #unnest_wider(extended) |> 
+  unnest_auto(weapons) |>
+  #   # select(-values)
+    hoist(weapons, referenceId = "referenceId") |>
+    unnest_auto(referenceId) |> unnest_auto(weapons) |> 
+  unnest_auto(values) |>
+    #unnest_wider(weapons) |>
+    unnest_wider(uniqueWeaponKills) |> #hoist(basic, kills="displayValue")
+    unnest_wider(basic) |> unnest_auto(displayValue) |>
+    mutate(uniqueWeaponKills = displayValue) |>
+    select(-value, -uniqueWeaponPrecisionKills,
+           -displayValue, -uniqueWeaponKillsPrecisionKills) -> #|>
+levelWeapon
+toc()
+
+```
+
+```{r}
+# Remove remaining list columns to substantially clean up the total:
+levelWeapon <- levelWeapon |> select(!where(is.list))
+```
+
+```{r}
+#| include: false
+paint::paint(levelWeapon)
+```
+
+```{r}
+# Join in weapon and then activity information from manifest
+manifestDB <- "resources/manifest.sqlite"
+
+db <- dbConnect(RSQLite::SQLite(), manifestDB)
+equippableItemsList <- dbGetQuery(db, "select * from itemsList") |>
+  mutate(hash = as.numeric(hash),
+         equipmentSlotTypeHash = as.numeric(equipmentSlotTypeHash))
+
+levelWeapon <- levelWeapon |> 
+  mutate(weaponId = as.numeric(referenceId)) |>
+  left_join(equippableItemsList, by=c("weaponId" = "hash"))
+
+dbDisconnect(db)
+  
+```
+
+```{r}
+manifestDB <- "resources/manifest.sqlite"
+db <- dbConnect(RSQLite::SQLite(), manifestDB)
+
+activityInfo <- dbGetQuery(db, "select * from activityInfo") |> mutate(hash=as.character(hash))
+levelWeapon <- levelWeapon |> 
+  mutate(char_directorActivityHash = as.character(directorActivityHash)) |>
+  left_join(activityInfo, by=c("char_directorActivityHash"="hash"))
+dbDisconnect(db)
+```
+
+# Display recent history
+
+These are the most recent 50 weapon-level records in the full game data we now have available in `levelWeapon`:
+
+```{r}
+levelWeapon |>
+ mutate(date = lubridate::date(period)) |> 
+  select(date, displayName, instanceId, mode=displayProperties.name.x, weapon=itemName, 
+         kills=uniqueWeaponKills) |> 
+  arrange(desc(date)) |> head(n=50) |> select(-instanceId) |>
+  DT::datatable(style="auto")
+```
+
+How many records are in the working data set?
+
+```{r}
+levelWeapon |> select(instanceId) |> unique() |> count()
+```
+
+```{r}
+#| eval: false
+
+# make a treemap of all weapons
+weapon_treemap(levelWeapon, limit=200)
+ggsave(file=glue("{membershipId}-output/all-weapons.png"), width=8, height=6)
+
+# specific weapon
+weapon_treemap(levelWeapon, type="Scout Rifle", limit = 100)
+
+# Iron Banner
+weapon_treemap(levelWeapon, mode=19, limit = 50)
+ggsave(file=glue("{membershipId}-output/all-weapons-IB.png"), width=8, height=6)
+
+# Set `tier` for weapon types
+weapon_treemap(levelWeapon, tier="Exotic")
+ggsave(file=glue("{membershipId}-output/all-weapons-exotic.png"),
+       width=8, height=6)
+
+weapon_treemap(levelWeapon, mode=82)
+  
+```
+
+```{r}
+#| eval: false
+
+levelWeapon |> 
+  group_by(itemType, itemName) |> summarise(total = sum(as.numeric(uniqueWeaponKills))) |> 
+  
+  arrange(desc(total)) |>group_by(itemType) |> slice_head(n=5) |>
+  ggplot(aes(x=total, y=forcats::fct_reorder(itemName, total))) + geom_col(height=.5) + facet_wrap(.~itemType, scales="free_y", ncol = 1) +
+  theme(strip.text = element_blank()) -> p2
+
+p1 <- weapon_treemap(levelWeapon
+                     )
+cowplot::plot_grid(p1, p2, rel_widths = c(2,1))
+
+
+t2 <- function(data=NULL, type=NULL, 
+                           tier_weapon = NULL, mode = NULL,
+                           limit=200, title=NULL,
+                           subtitle=NULL,
+               panel_title = NULL,
+               panel_subtitle = NULL
+                           ) 
+  {
+   if (!is.null(mode)) {
+     print("filtering on mode\n")
+     data |> 
+       rowwise() |> filter(modeIn(mode, modeString)) -> data
+       print(data |> select(modeString) |> unique())
+   }
+  
+   if (!is.null(tier_weapon)) {
+     data |> filter(tier==tier_weapon) -> data
+     #subtitle <- tier_weapon
+   }
+  
+   if (!is.null(type)) {
+     data |> rowwise() |>
+       filter(itemType==type) -> data
+     panel_subtitle <- paste0("type: ", type)
+   }
+  
+   p1 <- data |> 
+    group_by(itemName, itemType) |> tally(as.numeric(uniqueWeaponKills), name="total") |>
+  ungroup() |>
+  filter(total >= limit) |>
+  ggplot(aes(area=total, fill=total, label=as.factor(itemName), 
+             subgroup=as.factor(itemType))) + geom_treemap() + 
+  geom_treemap_subgroup_border() +
+  geom_treemap_subgroup_text(place = "centre", grow = T, alpha = 0.5, colour =
+                            "yellow", fontface = "italic", min.size = 0) +
+  geom_treemap_text(colour = "gray", place = "topleft", reflow = T) + 
+  ggtitle(title, subtitle=subtitle) + theme(legend.position = "none")
+   
+   p2 <- data |> group_by(itemType, itemName) |> summarise(total = sum(as.numeric(uniqueWeaponKills))) |> 
+  
+  arrange(desc(total)) |>group_by(itemType) |> slice_head(n=5) |>
+  ggplot(aes(x=total, y=forcats::fct_reorder(itemName, total))) +
+     # theme_solarized(light=FALSE) +
+     geom_col() + facet_wrap(.~itemType, scales="free_y", ncol = 2) +
+     theme(strip.text = element_blank()) +
+     theme(axis.title = element_blank()) +
+     theme(axis.text.x = element_text(size=5)) +
+     theme(axis.text.y = element_blank()) +
+     # theme(axis.text.y = element_text(size = 6)) +
+     scale_y_discrete(position="left", 
+                      label = function(x) stringr::str_trunc(x, 15)) +
+     geom_text(aes(x=max(total), label=forcats::fct_reorder(itemName, total)), hjust=1, size=2) 
+     
+   
+   #cowplot::plot_grid(p1, p2, rel_widths = c(2,1))
+   #cowplot::plot_grid(p2, p1, rel_widths = c(1,2)) 
+   p1 + p2 + plot_layout(widths = c(2, 1)) + plot_annotation(panel_title, panel_subtitle)
+  
+}
+
+levelWeapon |> t2(tier="Rare", mode=NULL, limit=100,
+                  panel_title="Rares")
+ggsave(file=glue("{membershipId}-output/all-weapons-panel.png"),
+       width=8, height=5)
+
+```
+
+```{r}
+# functions for combo plot
+# weapon_treemap
+# weapon_barplot
+# weapon_combovis
+
+weapon_treemap <- function(data=NULL, type=NULL, 
+                           tier_weapon = NULL, mode = NULL,
+                           limit=200, title=NULL,
+                           subtitle=NULL
+                           ) 
+  {
+   if (!is.null(mode)) {
+     #print("filtering on mode\n")
+     data |> 
+       rowwise() |> filter(modeIn(mode, modeString)) -> data
+     #  print(data |> select(modeString) |> unique())
+   }
+  
+   if (!is.null(tier_weapon)) {
+     data |> filter(tier==tier_weapon) -> data
+     #subtitle <- tier_weapon
+   }
+  
+   if (!is.null(type)) {
+     data |> rowwise() |>
+       filter(itemType==type) -> data
+     # panel_subtitle <- paste0("type: ", type)
+   }
+  
+   data |> 
+    group_by(itemName, itemType) |> tally(as.numeric(uniqueWeaponKills), name="total") |>
+  ungroup() |>
+  filter(total >= limit) |>
+  ggplot(aes(area=total, fill=total, label=as.factor(itemName), 
+             subgroup=as.factor(itemType))) +
+     geom_treemap(start="topleft") + 
+  geom_treemap_subgroup_border(start="topleft") +
+  geom_treemap_subgroup_text(start="topleft", place = "centre", grow = T, alpha = 0.5, colour =
+                            "yellow", fontface = "italic", min.size = 0) +
+  geom_treemap_text(start="topleft", colour = "gray", place = "topleft", reflow = T) + 
+  ggtitle(title, subtitle) + theme(legend.position = "none")
+}
+
+weapon_barplot <- function(data=NULL, type=NULL, 
+                           tier_weapon = NULL, mode = NULL,
+                           limit=5, 
+                           ncol=2,
+                           text_size=2,
+                           title=NULL,
+                           subtitle=NULL
+                           ) 
+  {
+   if (!is.null(mode)) {
+     #print("filtering on mode\n")
+     data |> 
+       rowwise() |> filter(modeIn(mode, modeString)) -> data
+       #print(data |> select(modeString) |> unique())
+   }
+  
+   if (!is.null(tier_weapon)) {
+     data |> filter(tier==tier_weapon) -> data
+     #subtitle <- tier_weapon
+   }
+  
+   if (!is.null(type)) {
+     data |> rowwise() |>
+       filter(itemType==type) -> data
+     # panel_subtitle <- paste0("type: ", type)
+   }
+ 
+ # make sorted levels 
+ itemtype_levels <- data |> group_by(itemType) |> summarise(total = sum(as.numeric(uniqueWeaponKills))) |> arrange(desc(total)) |> select(itemType)
+ # print(itemtype_levels$itemType)
+ 
+ data |> group_by(itemType, itemName) |> summarise(total = sum(as.numeric(uniqueWeaponKills))) |> 
+  
+  arrange(desc(total)) |>group_by(itemType) |> slice_head(n=limit) |>
+  ggplot(aes(x=total, y=forcats::fct_reorder(itemName, total))) +
+     # theme_dark() +
+     geom_col() + facet_wrap(.~factor(itemType, levels=itemtype_levels$itemType), 
+                             scales="free_y", ncol = ncol) +
+     # theme(strip.text = element_blank()) +
+     theme(strip.text.x = element_text(
+       margin = margin( b = 0, t = 0) 
+     )) +
+     theme(axis.title = element_blank()) +
+     theme(axis.text.x = element_text(size=5)) +
+     theme(axis.text.y = element_blank()) +
+     theme(axis.ticks.y = element_blank()) +
+     # theme(axis.text.y = element_text(size = 6)) +
+     # scale_y_discrete(position="left", 
+     #                  label = function(x) stringr::str_trunc(x, 15)) +
+     geom_text(aes(x=max(total), label=forcats::fct_reorder(itemName, total)), hjust=1, size=text_size) +
+   ggtitle(title, subtitle)
+  
+}
+
+weapon_duoplot <- function(p1, p2, width_1=1, width_2=1,
+                             panel_title=NULL,
+                             panel_subtitle=NULL,
+                           panel_caption=NULL)
+{
+  p1 + p2 + plot_layout(widths = c(width_1, width_2)) + 
+    plot_annotation(panel_title, panel_subtitle)
+}
+```
+
+# Weapon usage plots
+
+```{r}
+# style one
+# p1 <- weapon_treemap(levelWeapon)
+# p2 <- weapon_barplot(levelWeapon)
+# weapon_duoplot(p1, p2, panel_title = "All weapons")
+
+# style two -- compose directly with patchwork
+p1 <- weapon_treemap(levelWeapon, tier="Legendary", limit=100, 
+               title = NULL) +
+  weapon_barplot(levelWeapon, tier="Legendary", title = NULL, limit=7, 
+                 ncol=3, text_size = 2) +
+  plot_annotation(title="All Legendaries",
+                  caption="Built by D2Rstats",
+                  theme = c(theme(plot.caption = element_text(size=4)),
+                            theme(plot.title = element_text(size=22)))
+                  )
+ggsave(p1, file=glue("{membershipId}-output/all-weapons-legendary.png"),
+                 width=8, height=5)
+
+p1 <- weapon_treemap(levelWeapon, tier="Exotic", limit=7) +
+  weapon_barplot(levelWeapon, tier="Exotic", limit=7,
+                 ncol=3, text_size = 2) +
+  plot_annotation(title="All Exotics",
+                  caption="Built by D2Rstats",
+                  theme = c(theme(plot.caption = element_text(size=4)),
+                            theme(plot.title = element_text(size=22)))
+                  )
+ggsave(p1, file=glue("{membershipId}-output/all-weapons-exotic.png"),
+                 width=8, height=5)
+
+p1 <- weapon_treemap(levelWeapon, mode=82, limit=25) +
+  weapon_barplot(levelWeapon, mode=82, limit=5,
+                 ncol=3, text_size = 2) +
+  plot_annotation(title="All Dungeon Weapons",
+                  caption="Built by D2Rstats",
+                  theme = c(theme(plot.caption = element_text(size=4)),
+                            theme(plot.title = element_text(size=22)))
+                  )
+ggsave(p1, file=glue("{membershipId}-output/all-weapons-dungeons.png"),
+                 width=8, height=5)
+
+p1 <- weapon_treemap(levelWeapon, mode=5, limit=25) +
+  weapon_barplot(levelWeapon, mode=5, limit=5,
+                 ncol=3, text_size = 2) +
+  plot_annotation(title="All PVP Weapons",
+                  caption="Built by D2Rstats",
+                  theme = c(theme(plot.caption = element_text(size=4)),
+                            theme(plot.title = element_text(size=22)))
+                  )
+ggsave(p1, file=glue("{membershipId}-output/all-weapons-pvp.png"),
+                 width=8, height=5)
+
+```
+
+![](`r glue("{membershipId}-output/all-weapons-legendary.png")`)
+
+![](`r glue("{membershipId}-output/all-weapons-exotic.png")`)
+
+![](`r glue("{membershipId}-output/all-weapons-dungeons.png")`)
+
+![](`r glue("{membershipId}-output/all-weapons-pvp.png")`)
+
+
+```{r}
+#| echo: true
+# show kills for a single weapon
+weapon_treemap(levelWeapon, type="Scout Rifle", limit=100) +
+  weapon_barplot(levelWeapon, type="Scout Rifle", limit=25, ncol=4) +
+  plot_layout(nrow=1, widths = c(3,1))
+  
+```
+
+# PVP performance
+
+```{r}
+
+pvp1 <- NULL
+pvp2 <- NULL
+
+## only try PVP stats if there are PVP games in the data
+if(modeIn(5, levelWeapon$modeString)) {
+  # get year range
+
+  pvp_games <- levelWeapon |>
+    mutate(date = lubridate::as_date(period)) |>
+    group_by(instanceId) |>
+    filter(modeIn(5, modeString)) |>
+    select(instanceId, period, date, characterId, teamScore, characterClass,
+           #outcome,
+           standing,
+           deaths, kills, kda, score, displayProperties.name.x
+           ) |>
+    arrange(desc(period)) |> unique()
+
+  pvp_most_recent <- max(pvp_games$date)
+  pvp_range <- lubridate::year(pvp_most_recent-365)
+
+  pvp1 <- pvp_games |>
+    filter(lubridate::year(date) >= pvp_range) |>
+    ggplot(aes(x=date, y=as.numeric(kda), color=standing, size=score)) +
+      geom_hline(yintercept = 1.0, color="#ffffff") +
+      geom_quasirandom( varwidth = TRUE, width=.3, orientation = "x", alpha=.7) +
+    facet_wrap(.~characterClass) +
+    theme_solarized_2(light=FALSE, base_family = "Gill Sans") +
+    theme(legend.position = "none") +
+    labs(title = glue::glue("PVP since {pvp_range}"),
+         subtitle = "Wins & Losses / Scaled by player score",
+         y = "KDA", x=NULL)
+  
+if("Iron Banner" %in% pvp_games$displayProperties.name.x) {
+  pvp2 <- pvp_games |>
+    filter(displayProperties.name.x == "Iron Banner") |>
+    filter(lubridate::year(date) >= pvp_range) |>
+    ggplot(aes(x=date, y=as.numeric(kda), color=standing, size=score)) +
+      geom_hline(yintercept = 1.0, color="#ffffff") +
+      geom_quasirandom( varwidth = TRUE, width=.3, orientation = "x", alpha=.7) +
+    facet_wrap(lubridate::year(date)~., scales = "free_x") +
+    theme_solarized_2(light=FALSE, base_family = "Gill Sans") +
+    theme(legend.position = "none") +
+    labs(title = "Iron Banner",
+         subtitle = "Wins & Losses / Scaled by player score",
+         y = "KDA", x=NULL)
+} # Iron Banner check
+  
+} else {
+  print("No PVP games")
+}
+
+pvp1
+
+pvp2
+
+```
+
+```{r}
+#| eval: false
+#| echo: true
+
+# This example isn't built with the document
+
+# Here's a more detailed PVP example,
+# showing Iron Banner games for a specific character,
+# limited to the first IB week of season 2021,
+# and annotated with caption calling out
+# these as the games for Gilded title
+pvp_games |>
+  filter(date >= as.Date("2023-06-01"),
+         date < as.Date("2023-06-15"),
+         characterClass == "Hunter"
+         ) |>
+  ggplot(aes(x=date, y=as.numeric(kda), color=standing, size=score)) +
+    geom_hline(yintercept = 1, color="white") +
+    geom_quasirandom( varwidth = TRUE, width=.3, orientation = "x", alpha=.7) +
+  theme_solarized_2(light=FALSE, base_family = "Gill Sans") +
+  theme(legend.position = "none") +
+  labs(title = "Iron Banner #1, Season 21",
+       subtitle = "Wins & Losses / Scaled by player score",
+       caption = "The road to Gilded x 4, all games on Hunter",
+       y = "KDA", x=NULL)
+```
+
+```{r}
+toc() # end timing for full run
+```

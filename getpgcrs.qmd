@@ -1,0 +1,255 @@
+---
+title: "D2Rstats: getPCGRs"
+format: html
+editor: visual
+editor_options: 
+  chunk_output_type: inline
+echo: false
+warning: false
+embed-resources: true
+---
+
+The getPCGR process does the following:
+
+1.  Takes a user ID, platform and API key from `parameters.R`
+
+2.  Gets activity history via the Destiny 2 API to get all pages of member history
+
+3.  Downloads all histories to a storage location
+
+    -   Uses multithreading to speed up downloads, for about 1000 PGCRs per minute using 9 core.
+    -   Downloaded PGCRs are stored in a member-ID specific folder
+    -   Subsequent runs of the notebook will only retrieve not-yet-downloaded PGCR files. Resuming an interrupted download process get updated information will work fine and not require starting over.
+        -   If errors in the Bungie API provided data result in some PGCRs not being included in the correct "all activity" endpoint call, re-running the notebook after those issues are corrected *should* properly find and download the new PGCRs when they are available.
+
+# Startup and set some parameters
+
+Here we're loading some libraries and sourcing the parameters file that is configured in setup.
+
+```{r}
+
+library(httr2)
+library(glue)
+library(tibble)
+library(dplyr)
+library(tidyjson)
+library(tictoc)
+
+# *** set parameters file
+pfile <- "parameters.R"
+source(pfile)
+
+api_root <- "https://www.bungie.net/Platform"
+
+glue("Getting data for ID {membershipId}")
+
+
+```
+
+# Get characters and history
+
+-   get list of character IDs using membershipId
+-   API Path: `/Destiny2/{membershipType}/Account/{destinyMembershipId}/Stats/`
+-   Gets aggregate historical stats organized around each character for a given account.
+
+```{r}
+
+request_path <- glue("{api_root}/Destiny2/{membershipType}/Account/{membershipId}/Stats")
+
+req <- request(request_path)
+req |> req_headers("X-API-Key" = API_KEY) |> req_dry_run()
+resp <- req |> req_headers("X-API-Key" = API_KEY) |> req_perform(verbosity = 0)
+
+# make primary characters array
+chars_exploded <- resp_body_json(resp)$Response$characters |> 
+  as.tbl_json() |> spread_all() 
+characters <- chars_exploded |> select(characterId) |> as_tibble()
+# characters$characterId 
+
+characters
+
+```
+
+Now we iterate through all characters and fetch the IDs of all their activities. This isn't yet getting game details, but rather is the list of all activities in the characters' histories.
+
+```{r}
+#| warning: false
+# TODO find this deprecated automatic coercion warning
+
+library(doFuture)
+# with characters, can get full list of activity IDs
+# {API_ROOT_PATH}/Destiny2/{membershipType}/Account/{destinyMembershipId}/Character/{characterId}/Stats/Activities/
+# parameters: mode="None", count=250
+
+# do some path stuff
+# check destination path for existing PGCRs
+# and run only those that don't already exist 
+# in the destination.
+# If {membershipId}-pgcrs doesn't exist, create it
+pcgrPath <- glue("{membershipId}-pgcrs")
+if (!dir.exists(pcgrPath)) {
+  dir.create(pcgrPath)
+} else {
+  # If the directory exists, get the list of pgcrs present
+  # and parse to just the activityIDs.
+  existingActivities <- list.files(pcgrPath, pattern="*.json") |>
+    stringi::stri_extract(regex="[0-9]+", mode="last") |> unique()
+}
+# we now have `existingActivities` available 
+
+get_activities <- function(count, page, characterId, membershipId, 
+                           membershipType, mode, api_root, API_KEY) {
+  # print(glue("req_char: {characterId}, page: {page}"))
+  stats_request_path <-
+    glue("{api_root}/Destiny2/{membershipType}/Account/{membershipId}/Character/{characterId}/Stats/Activities")
+  
+  # print(stats_request_path)
+  stats_req <- request(stats_request_path)
+# goal: wrap below in a multithread, incrementing page for each request until
+  stats_req |> 
+    req_headers("X-API-Key" = API_KEY) |> 
+    req_url_query(count=count, mode=mode, page=page) |>
+    # req_dry_run()
+    req_perform(verbosity = 0) -> stats_resp
+    stats_resp
+}
+
+tic() # time the loop to get all activity IDs in parallel
+registerDoFuture()
+plan(multisession)
+
+activities <- NULL
+activities_parallel <- foreach(char = characters$characterId) %dopar% {
+  activities <- NULL
+  # for dopar
+  source(pfile)
+  api_root <- "https://www.bungie.net/Platform"
+  # /
+  
+  breakPage <- FALSE
+  req_page <- 0
+  req_char <- char
+
+  # this while loop will only get results until a result from the current
+  # response page is found in `existingActivities`
+  # TODO remove req_page limit here?
+  while(breakPage == FALSE) { #& req_page < 100) {
+    # print(glue("req_char: {req_char}, page: {req_page}"))
+    stats_resp <- get_activities(250, req_page, req_char, 
+                 membershipId, membershipType, "None", api_root, API_KEY)
+    
+    if (!is.null(resp_body_json(stats_resp)$Response$activities)) { 
+    # TRUE if there is no data in the page returned
+    resp_body_json(stats_resp)$Response$activities |> as.tbl_json() |>
+      spread_values(instanceId = jstring(activityDetails, instanceId), 
+                    mode = jstring(activityDetails, mode),
+                    period = jstring(period)) |> 
+      as_tibble() |> # remove JSON attribute
+      mutate(character = req_char) ->
+        ##### save data rows ####
+        parsed_activities
+      
+      # break out if activities from this page are found in existingActivities
+      # Stats/Activities endpoint --> List of activities, the most recent activity first.
+      # So as soon as we find any existing IDs, we can stop fetching history
+      if (any((parsed_activities$instanceId %in% existingActivities))) {
+        #testBreak <- TRUE
+        print(glue("{req_char}: Activity history list is caught up"))
+        breakPage <- TRUE
+      }
+      
+      # if (req_page == 0) {
+      #   activities <- parsed_activities
+      # } else {
+        activities <- rbind(activities, parsed_activities)
+        
+      # }
+    }  else { 
+      breakPage <- TRUE  
+    }
+    req_page <- req_page + 1
+  }
+  activities
+}
+toc()
+
+# with list of activities retrieved
+# can select down to just the instanceIds that
+# will make the PGCR list to fetch
+activityIds <- do.call(rbind, activities_parallel) |> select(value = instanceId)
+
+```
+
+# Fetch PGCR files from API
+
+Use {furrr} `future_map` to set up multiple threads and run the `get_pgcr` function for every activity that's not yet in our completed activity list.
+
+```{r}
+library(furrr)
+
+# note: multiprocess httr2 appears to work okay with req_perform, but
+# req_dry_run fails on port conflicts, so we should have a separate testing
+# function to run req_dry_run without being part of furrr::future_map
+
+get_pgcr <- function(activity) {
+  pgcr_request_path <-
+    glue("{api_root}/Destiny2/Stats/PostGameCarnageReport/{activity}/")
+  pgcr_request <- request(pgcr_request_path)
+  req_retry(pgcr_request, max_tries = 10) |>
+    req_headers("X-API-Key" = API_KEY) |>
+    req_perform() -> pgcr_request_response
+  resp_body_json(pgcr_request_response)$Response |> jsonlite::toJSON() |> 
+    write(file=glue("{pcgrPath}/pgcr-{activity}.json"))
+  # then save result to file
+}
+
+# runActivitySet gets the activityIds that aren't yet in our PGCR folder
+runActivitySet <- activityIds |> filter(!value %in% existingActivities)
+
+# Optionally, manually set subset of activityIDs here, if not running all of
+# them. For example:
+# runActivitySet <- activityIds[0:5000,] |> filter(!value %in% existingActivities)
+
+# approximate timings:
+# approx 400 pcgrs, 55 sec, x5 workers
+# approx 400 pgcrs, 340sec, x1 worker
+# approx 1000 pgcrs, 65sec, x9 workers
+# 285.281 sec elapsed, 5108 pgcrs, x9 workers
+# using one worker doesn't show progress bar
+
+# run getpgcrs with multiprocess using the runActivitySet scoped above
+
+#if (is_tibble(runActivitySet)) {
+if (nrow(runActivitySet) > 0) {
+  print(glue("\n** {nrow(runActivitySet)} un-processed activities found **\n"))
+  tic()
+  plan(multisession, workers=availableCores()-1)
+  chunks <- nrow(runActivitySet) / 800
+  for(i in 1:ceiling(chunks)) {
+    # set up groups to iterate through and allow pauses on API
+    group <- i*800 # 800 is a nice arbitrary number that doesn't seem quite as
+                   # greedy as a full thousand
+    activitySlice <- slice(runActivitySet, c((group-800):group))
+    if (nrow(runActivitySet) > group) {
+      print(glue("\nRetrieving PGCRs group {group-800} to {group}"))  
+    } else {
+      print(glue("\nRetrieving PGCRs group {group-800} to {nrow(runActivitySet)}"))
+    }
+    
+    # ** get pcgrs below **
+    # Using future_map to parallelize
+    future_map(activitySlice$value, get_pgcr, .progress = TRUE, .options =
+      furrr_options(seed=TRUE, 
+      globals=c("API_KEY", "api_root", "membershipId", "pcgrPath"),
+      packages=c("httr2", "glue")))
+    Sys.sleep(3) # quick snooze
+  }
+  toc()
+} else {
+  # We have no new PCGRs:
+  # print(glue("Up to date with {nrow(activityIds |> unique())} PGCRs, nothing to do.\n\n"))
+  print(glue("Up to date with {length(existingActivities)} total PGCRs, nothing to do.\n\n"))
+}
+
+
+```

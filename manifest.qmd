@@ -1,0 +1,118 @@
+---
+title: "D2Rstats - manifest"
+format: html
+editor: visual
+editor_options: 
+  chunk_output_type: inline
+echo: false
+warning: false
+embed-resources: true
+---
+
+# Get and process manifest
+
+-   If we don't yet have a manifest, fetch and process
+    -   Store sqlite manifest with item and activity information locally
+-   If we have a manifest, check its date against the date of the current one from the API
+    -   If out of date, then update
+
+```{r}
+library(httr2)
+library(tidyjson)
+library(glue)
+library(DBI)
+library(dplyr)
+
+source("parameters.R")
+manifestDB <- "resources/manifest.sqlite"
+
+# get manifest with httr2
+manifestRequest <- request(glue("https://www.bungie.net/Platform/Destiny2/Manifest"))
+remoteManifest <- manifestRequest |> req_headers("X-API-Key" = API_KEY) |>
+  # req_dry_run()
+  req_perform()
+
+manifest_version <- resp_body_json(remoteManifest)$Response$version 
+newestManifest <- strsplit(manifest_version, ".", fixed=TRUE)[[1]][1]
+ 
+latestStoredManifest <- 0
+if (fs::file_exists(manifestDB)) {
+  db <- dbConnect(RSQLite::SQLite(), manifestDB)
+  manifestInfo <- dbGetQuery(db, 'SELECT * FROM manifestInfo')
+  latestStoredManifest <- manifestInfo |> filter(row_number()==n()) |> 
+    select(manifest_version) |> 
+    mutate(manifest_version = strsplit(manifest_version, ".", fixed=TRUE)[[1]][1]) |> 
+    as.numeric()
+  # latestStoredManifest <- manifestInfo |> filter(row_number()==n()) |> 
+  #   select(manifest_version) |> 
+  #   stringi::stri_match_first_regex("\\w+")
+  dbDisconnect(db)
+} else {
+  glue("No stored manifest...\n")
+  fs::dir_create("resources")
+}
+
+glue("Latest stored manifest: {latestStoredManifest}\n")
+glue("Newest available manifest: {newestManifest}\n")
+
+if (newestManifest > latestStoredManifest) {
+  glue("processing new manifest")
+  en_content <- resp_body_json(remoteManifest)$Response$mobileWorldContentPaths$en
+  # download new file
+  # process and save
+  # save version data to manifestInfo
+    download.file(glue("https://www.bungie.net{en_content}"),
+                destfile="resources/manifest.download")
+  manifestFile <- unzip("resources/manifest.download", list=TRUE)$Name
+  unzip("resources/manifest.download", exdir="resources")
+  # file.rename(from=glue("resource/{manifestFile}"), to="resources/manifest.content")
+    
+  mdb <- dbConnect(RSQLite::SQLite(), glue("resources/{manifestFile}"))
+  #dbGetQuery(mdb, "select name from sqlite_master") # check tables
+  items <- dbGetQuery(mdb, "select * from DestinyInventoryItemDefinition")
+  itemsList <- items$json |> as_tbl_json() |> #spread_all() |> str()
+    spread_values(itemType = jstring("itemTypeDisplayName"),
+                  hash = jstring("hash"),
+                  itemName = jstring("displayProperties", "name"),
+                  equipmentSlotTypeHash = jstring("equippingBlock", "equipmentSlotTypeHash"),
+                  tier = jstring("inventory", "tierTypeName"))
+  
+  buckets <- dbGetQuery(mdb, "select * from DestinyInventoryBucketDefinition")
+  bucketsLabels <- buckets$json |> as_tbl_json() |>
+    spread_values(bucketDescripton = jstring("displayProperties", "description"),
+                  bucketName = jstring("displayProperties", "name"),
+                  bucketHash = jstring("hash"))
+  
+  itemsListFinal <- itemsList |> left_join(bucketsLabels,
+                                          by=c("equipmentSlotTypeHash"="bucketHash"))
+  
+  db <- dbConnect(RSQLite::SQLite(), manifestDB)
+  dbWriteTable(db, "itemsList", as.data.frame(itemsListFinal), overwrite=TRUE)
+
+  activityDefs <- dbGetQuery(mdb, "select * from DestinyActivityDefinition")
+  ad <- as.tbl_json(activityDefs$json) |> tidyjson::spread_all() 
+  activityTypes <- dbGetQuery(mdb, "select * from DestinyActivityTypeDefinition")
+  at <- as.tbl_json(activityTypes$json) |> tidyjson::spread_all() 
+  activityInfo <- ad |> select(releaseIcon, hash, displayProperties.description,
+                               displayProperties.name, displayProperties.icon, 
+                               activityTypeHash) |>
+  left_join(at |> select(hash, displayProperties.name, displayProperties.icon, 
+                         displayProperties.description),
+       by=c("activityTypeHash"="hash"))
+  
+  dbWriteTable(db, "activityInfo", as.data.frame(activityInfo), overwrite = TRUE)
+  
+  dbWriteTable(db, "manifestInfo", 
+               as.data.frame(tibble(en_content, manifest_version, date())),
+               append=TRUE)
+  dbDisconnect(mdb)
+  dbDisconnect(db)
+  fs::file_delete(glue("resources/{manifestFile}"))
+  fs::file_delete(glue("resources/manifest.download"))
+} else {
+  glue("manifest up to date")
+}
+
+
+```
+
