@@ -324,6 +324,30 @@ levelWeapon <- levelWeapon |>
 dbDisconnect(db)
 ```
 
+```{r}
+#| eval: true
+
+# levelWeapon is the full data set used in the rest of the notebook;
+# save off a copy for easy re-use without rebuilding from PGCRs
+
+if(!fs::dir_exists(glue("{membershipId}-data")))
+{
+  fs::dir_create(glue("{membershipId}-data"))  
+}
+save(levelWeapon, file=glue("{membershipId}-data/PGCRdata"))
+```
+
+```{r}
+#| eval: false
+# Load user-specific saved data
+# This allows skipping load/process steps above to re-use preprocessed data
+if(fs::file_exists(glue("{membershipId}-data/PGCRdata"))) {
+  load(glue("{membershipId}-data/PGCRdata"))
+} else {
+  print("No stored PGCR data set found.\n")
+}
+```
+
 # Display recent history
 
 These are the most recent 50 weapon-level records in the full game data we now have available in `levelWeapon`:
@@ -341,29 +365,6 @@ How many records are in the working data set?
 
 ```{r}
 levelWeapon |> select(instanceId) |> unique() |> count()
-```
-
-```{r}
-#| eval: false
-
-# make a treemap of all weapons
-weapon_treemap(levelWeapon, limit=200)
-ggsave(file=glue("{membershipId}-output/all-weapons.png"), width=8, height=6)
-
-# specific weapon
-weapon_treemap(levelWeapon, type="Scout Rifle", limit = 100)
-
-# Iron Banner
-weapon_treemap(levelWeapon, mode=19, limit = 50)
-ggsave(file=glue("{membershipId}-output/all-weapons-IB.png"), width=8, height=6)
-
-# Set `tier` for weapon types
-weapon_treemap(levelWeapon, tier="Exotic")
-ggsave(file=glue("{membershipId}-output/all-weapons-exotic.png"),
-       width=8, height=6)
-
-weapon_treemap(levelWeapon, mode=82)
-  
 ```
 
 
