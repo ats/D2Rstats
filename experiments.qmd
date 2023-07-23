@@ -1,0 +1,132 @@
+---
+title: "Experiments"
+format: html
+---
+
+```{r}
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+library(ggthemes)
+library(gifski)
+library(gganimate)
+library(glue)
+
+
+source("parameters.R")
+```
+
+```{r}
+# load data
+load(glue::glue("{membershipId}-data/PGCRdata"))
+```
+
+```{r}
+racePlot <- function(..., activityType, limit=30, label="", prefix=NULL, gif=NULL, av=NULL) {
+  data <- as_tibble(...)
+  gamedata <- data |> rowwise() |> 
+  filter(modeIn(activityType, modeString)) |> 
+  mutate(date = lubridate::as_date(period)) |> 
+  group_by(date, itemName, bucketName) |> 
+  arrange(date, itemName) |> 
+  summarize(groupedWeaponKills = sum(as.numeric(uniqueWeaponKills))) |>
+  group_by(itemName) |> 
+  mutate(cumWeaponKills = cumsum(groupedWeaponKills))
+  paint::paint(gamedata)
+  # gamedata
+  
+  outputPath <- glue("{membershipId}-output")
+  
+  dataWide <- gamedata |> 
+    filter(itemName != "") |>
+    tidyr::pivot_wider(id_cols = date, 
+                       names_from = itemName, 
+                       values_from = cumWeaponKills) 
+  # paint::paint(dataWide)
+  
+  # dataExploded <- gamedata |>
+  dataExploded <- dataWide |>
+    tidyr::pivot_longer(2:ncol(dataWide), values_to = "cumWeaponKills") |>
+    # tidyr::pivot_longer(2:ncol(gamedata), values_to = "cumWeaponKills") |>
+  group_by(name) |> tidyr::fill(cumWeaponKills) |>
+  mutate(cumWeaponKills = tidyr::replace_na(cumWeaponKills, 0))
+  paint::paint(dataExploded)
+  
+  animatedPlot <- dataExploded |> ungroup() |>
+  filter(cumWeaponKills > 0) |>
+  group_by(date) |>
+  slice_max(cumWeaponKills, n=limit) |> #ungroup() |>
+  arrange(date, cumWeaponKills) |> mutate(order = 1:n()) |> ungroup() |>
+
+  ggplot(aes(order, group=name)) +
+  geom_tile(
+    aes(y=cumWeaponKills/2, height=cumWeaponKills, width=.8),
+    color="pink", linewidth=.75
+  ) +
+  geom_text(aes(x=order, y=cumWeaponKills+5, label=name, hjust="inward"),
+            color="white",
+            size=4, check_overlap = TRUE) +
+  coord_flip() +
+  labs(title=label,
+       subtitle='{closest_state}') +
+  ylab("Total eliminations") +
+  xlab("") +
+  theme_solarized(light=FALSE) +
+  theme(plot.subtitle = element_text(size = 20),
+        plot.title = element_text(size=22)) +
+  theme(panel.grid.major = element_blank()) +
+  theme(panel.grid.minor = element_blank()) +
+  theme(line = element_blank()) +
+  theme(axis.text.y = element_blank()) +
+  theme(axis.ticks.y = element_blank()) +
+  transition_states(date, transition_length = 20, state_length = 1, wrap=FALSE) +
+  view_follow(fixed_y=TRUE) +
+  # enter_fly(x_loc=0, y_loc=0) + exit_fly(x_loc=0, y_loc = 0) +
+    enter_appear(early=TRUE)+
+    # enter_fade() +
+    enter_recolor(color = "yellow", fill="yellow") + enter_drift(x_mod = -5)
+    # enter_reset() + exit_reset()
+
+  if (is.character(gif)) {
+    gif <- fs::path_sanitize(gif)
+    animate(animatedPlot, nframes = 200, end_pause = 10, 
+            renderer = gifski_renderer(glue("{outputPath}/{gif}_weapons.gif")))
+  }
+  if (is.character(av)) {
+    av <- fs::path_sanitize(av)
+    animate(animatedPlot, height=800, width=800, nframes=600, fps=20, 
+            renderer = av_renderer(glue("{outputPath}/{av}_weapons.mp4")))
+  }
+  if (is.character(prefix)) {
+    prefix <- fs::path_sanitize(prefix)
+    animate(animatedPlot, nframes = 200, end_pause = 10, 
+            renderer = gifski_renderer(glue("{outputPath}/{prefix}_weapons.gif")))
+    animate(animatedPlot, height=800, width=800, nframes=600, fps=20, 
+            renderer = av_renderer(glue("{outputPath}/{prefix}_weapons.mp4")))
+  }
+  
+  # output animatedPlot if a file output isn't specified
+  if (is.null(prefix) & is.null(av) & is.null(gif)) {
+    return(animatedPlot)
+  }
+}
+```
+
+```{r}
+levelWeapon |>
+  racePlot(activityType="82", limit=30, label="Dungeon weapons over time")
+
+levelWeapon |> 
+  racePlot(activityType="19", limit=30, label="Iron Banner kills", prefix="ib")
+levelWeapon |>
+  racePlot(activityType="4", label="Raid kills", gif="raid", av="raid")
+levelWeapon |>
+  racePlot(activityType="82", limit=30, label="Dungeon kills", av="dungeon")
+levelWeapon |>
+  racePlot(activityType="46", limit=30, label="GM NF? kills", prefix="gm")
+levelWeapon |> 
+  racePlot(activityType = "5", label="All PVP Ever!", gif="pvp")
+
+
+```
+
