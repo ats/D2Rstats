@@ -563,13 +563,14 @@ pvp2 <- NULL
 pvp3 <- NULL
 
 ## only try PVP stats if there are PVP games in the data
-if(modeIn(5, levelWeapon$modeString)) {
-  # get year range
+# if(modeIn(5, levelWeapon$modeString)) {
+if(nrow(filter_mode(levelWeapon, 5) > 0)) {
 
   pvp_games <- levelWeapon |>
     mutate(date = lubridate::as_date(period)) |>
     group_by(instanceId) |>
-    filter(modeIn(5, modeString)) |>
+    filter_mode(5) |>
+    #filter(modeIn(5, modeString)) |>
     select(instanceId, period, date, characterId, teamScore, characterClass,
            #outcome,
            standing,
