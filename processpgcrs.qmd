@@ -15,6 +15,10 @@ embed-resources: true
 source("parameters.R")
 ```
 
+```{r}
+# temp: load d2helper
+devtools::load_all("~/workspace/d2helper")
+```
 
 # Build PGCR data set for `r filterName`
 
@@ -166,7 +170,8 @@ levelActivity |> select(-mode) |> # remove unneeded single mode column
   if (filterMode != "") {
     levelActivity |>
       rowwise() |>
-      filter(modeIn(filterMode, modeString)) ->
+      #filter(modeIn(filterMode, modeString)) ->
+      filter(filter_mode(filterMode)) ->
       levelActivity
   }
 
@@ -374,106 +379,15 @@ levelWeapon |> select(instanceId) |> unique() |> count()
 # weapon_barplot
 # weapon_combovis
 
-weapon_treemap <- function(data=NULL, type=NULL, 
-                           tier_weapon = NULL, mode = NULL,
-                           limit=200, title=NULL,
-                           subtitle=NULL
-                           ) 
-  {
-   if (!is.null(mode)) {
-     #print("filtering on mode\n")
-     data |> 
-       rowwise() |> filter(modeIn(mode, modeString)) -> data
-     #  print(data |> select(modeString) |> unique())
-   }
-  
-   if (!is.null(tier_weapon)) {
-     data |> filter(tier==tier_weapon) -> data
-     #subtitle <- tier_weapon
-   }
-  
-   if (!is.null(type)) {
-     data |> rowwise() |>
-       filter(itemType==type) -> data
-     # panel_subtitle <- paste0("type: ", type)
-   }
-  
-   data |> 
-    group_by(itemName, itemType) |> tally(as.numeric(uniqueWeaponKills), name="total") |>
-  ungroup() |>
-  filter(total >= limit) |>
-  ggplot(aes(area=total, fill=total, label=as.factor(itemName), 
-             subgroup=as.factor(itemType))) +
-     geom_treemap(start="topleft") + 
-  geom_treemap_subgroup_border(start="topleft") +
-  geom_treemap_subgroup_text(start="topleft", place = "centre", grow = T, alpha = 0.5, colour =
-                            "yellow", fontface = "italic", min.size = 0) +
-  geom_treemap_text(start="topleft", colour = "gray", place = "topleft", reflow = T) + 
-  ggtitle(title, subtitle) + theme(legend.position = "none")
-}
 
-weapon_barplot <- function(data=NULL, type=NULL, 
-                           tier_weapon = NULL, mode = NULL,
-                           limit=5, 
-                           ncol=2,
-                           text_size=2,
-                           title=NULL,
-                           subtitle=NULL
-                           ) 
-  {
-   if (!is.null(mode)) {
-     #print("filtering on mode\n")
-     data |> 
-       rowwise() |> filter(modeIn(mode, modeString)) -> data
-       #print(data |> select(modeString) |> unique())
-   }
-  
-   if (!is.null(tier_weapon)) {
-     data |> filter(tier==tier_weapon) -> data
-     #subtitle <- tier_weapon
-   }
-  
-   if (!is.null(type)) {
-     data |> rowwise() |>
-       filter(itemType==type) -> data
-     # panel_subtitle <- paste0("type: ", type)
-   }
- 
- # make sorted levels 
- itemtype_levels <- data |> group_by(itemType) |> summarise(total = sum(as.numeric(uniqueWeaponKills))) |> arrange(desc(total)) |> select(itemType)
- # print(itemtype_levels$itemType)
- 
- data |> group_by(itemType, itemName) |> summarise(total = sum(as.numeric(uniqueWeaponKills))) |> 
-  
-  arrange(desc(total)) |>group_by(itemType) |> slice_head(n=limit) |>
-  ggplot(aes(x=total, y=forcats::fct_reorder(itemName, total))) +
-     # theme_dark() +
-     geom_col() + facet_wrap(.~factor(itemType, levels=itemtype_levels$itemType), 
-                             scales="free_y", ncol = ncol) +
-     # theme(strip.text = element_blank()) +
-     theme(strip.text.x = element_text(
-       margin = margin( b = 0, t = 0) 
-     )) +
-     theme(axis.title = element_blank()) +
-     theme(axis.text.x = element_text(size=5)) +
-     theme(axis.text.y = element_blank()) +
-     theme(axis.ticks.y = element_blank()) +
-     # theme(axis.text.y = element_text(size = 6)) +
-     # scale_y_discrete(position="left", 
-     #                  label = function(x) stringr::str_trunc(x, 15)) +
-     geom_text(aes(x=max(total), label=forcats::fct_reorder(itemName, total)), hjust=1, size=text_size) +
-   ggtitle(title, subtitle)
-  
-}
-
-weapon_duoplot <- function(p1, p2, width_1=1, width_2=1,
-                             panel_title=NULL,
-                             panel_subtitle=NULL,
-                           panel_caption=NULL)
-{
-  p1 + p2 + plot_layout(widths = c(width_1, width_2)) + 
-    plot_annotation(panel_title, panel_subtitle)
-}
+# weapon_duoplot <- function(p1, p2, width_1=1, width_2=1,
+#                              panel_title=NULL,
+#                              panel_subtitle=NULL,
+#                            panel_caption=NULL)
+# {
+#   p1 + p2 + plot_layout(widths = c(width_1, width_2)) + 
+#     plot_annotation(panel_title, panel_subtitle)
+# }
 ```
 
 # Weapon usage plots
@@ -564,7 +478,7 @@ pvp3 <- NULL
 
 ## only try PVP stats if there are PVP games in the data
 # if(modeIn(5, levelWeapon$modeString)) {
-if(nrow(filter_mode(levelWeapon, 5) > 0)) {
+if(nrow(filter_mode(levelWeapon, mode=5) > 0)) {
 
   pvp_games <- levelWeapon |>
     mutate(date = lubridate::as_date(period)) |>
