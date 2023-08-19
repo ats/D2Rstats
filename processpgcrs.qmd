@@ -528,9 +528,10 @@ pvp3
 # and annotated with caption calling out
 # these as the games for Gilded title
 pvp_games |>
-  filter(date >= as.Date("2023-06-01"),
-         date < as.Date("2023-06-15"),
-         characterClass == "Hunter"
+  filter(date >= as.Date("2023-06-01") &
+         date < as.Date("2023-06-15") &
+         characterClass == "Hunter" &
+         displayProperties.name.x == "Iron Banner"
          ) |>
   ggplot(aes(x=date, y=as.numeric(kda), color=standing, size=score)) +
     geom_hline(yintercept = 1, color="white") +
