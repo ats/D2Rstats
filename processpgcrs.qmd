@@ -298,22 +298,27 @@ dbDisconnect(db)
 # levelWeapon is the full data set used in the rest of the notebook;
 # save off a copy for easy re-use without rebuilding from PGCRs
 
-if(!fs::dir_exists(glue("{membershipId}-data")))
-{
-  fs::dir_create(glue("{membershipId}-data"))  
-}
-save(levelWeapon, file=glue("{membershipId}-data/PGCRdata"))
+# if(!fs::dir_exists(glue("{membershipId}-data")))
+# {
+#   fs::dir_create(glue("{membershipId}-data"))  
+# }
+# save(levelWeapon, file=glue("{membershipId}-data/PGCRdata"))
+
+save_pgcr_data(membershipId, levelWeapon)
 ```
 
 ```{r}
 #| eval: false
 # Load user-specific saved data
 # This allows skipping load/process steps above to re-use preprocessed data
-if(fs::file_exists(glue("{membershipId}-data/PGCRdata"))) {
-  load(glue("{membershipId}-data/PGCRdata"))
-} else {
-  print("No stored PGCR data set found.\n")
-}
+# if(fs::file_exists(glue("{membershipId}-data/PGCRdata"))) {
+#   load(glue("{membershipId}-data/PGCRdata"))
+# } else {
+#   print("No stored PGCR data set found.\n")
+#}
+
+load_pgcr_data(membershipId)
+
 ```
 
 # Display recent history

@@ -17,14 +17,17 @@ source("parameters.R")
 ```
 
 ```{r}
-# load data
-load(glue("{membershipId}-data/PGCRdata"))
+# load dev version of d2helper
+devtools::load_all("~/workspace/d2helper")
 ```
 
 ```{r}
-# load dev version of d2helper
-load_all("~/workspace/d2helper")
+# load data
+# load(glue("{membershipId}-data/PGCRdata"))
+load_pgcr_data(membershipId)
+
 ```
+
 
 
 ```{r}
@@ -32,16 +35,15 @@ levelWeapon |>
   animate_history(activity_type = 82, limit=30, label="Dungeon weapons over time")
 
 levelWeapon |> 
-  animate_history(activityType=19, limit=30, label="Iron Banner kills", prefix="ib")
+  animate_history(activity_type=19, limit=30, label="Iron Banner kills", prefix="ib")
 levelWeapon |>
-  animate_history(activityType="4", label="Raid kills", gif="raid", av="raid")
+  animate_history(activity_type="4", label="Raid kills", prefix="raid", gif=TRUE)
 levelWeapon |>
-  animate_history(activityType="82", limit=30, label="Dungeon kills", av="dungeon")
+  animate_history(activity_type="82", limit=30, label="Dungeon kills", mp4=TRUE)
 levelWeapon |>
-  animate_history(activityType="46", limit=30, label="GM NF? kills", prefix="gm")
+  animate_history(activity_type="46", limit=30, label="GM NF? kills", prefix="gm", gif=TRUE)
 levelWeapon |> 
-  animate_history(activityType = "5", label="All PVP Ever!", gif="pvp")
-
+  animate_history(activity_type = "5", label="All PVP Ever!", gif=TRUE)
 
 ```
 
