@@ -17,7 +17,11 @@ source("parameters.R")
 
 ```{r}
 # temp: load d2helper
-devtools::load_all("~/workspace/d2helper")
+# devtools::load_all("~/workspace/d2helper")
+
+# install d2helper with
+# devtools::install_github("ats/d2helper")
+library(d2helper)
 ```
 
 # Build PGCR data set for `r filterName`
