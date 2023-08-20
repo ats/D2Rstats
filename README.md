@@ -16,6 +16,10 @@ Running `processpgcrs.qmd` builds an html file containing recent history and som
 
 ![A more customized Iron Banner history example](images/D2Rstats-iron_banner_example.png)
 
+The `experiments.qmd` notebook shows how to produce animated racing barplots such as this one:
+
+![](images/D2Rstats-raid_weapons.gif)
+
 ## Requirements
 
 -   You'll need an API key from the Destiny 2 API, available by [creating an application here](https://www.bungie.net/en/Application).

@@ -1,6 +1,8 @@
 ---
 title: "Experiments"
 format: html
+echo: false
+warning: false
 ---
 
 ```{r}
@@ -11,39 +13,48 @@ library(ggthemes)
 library(gifski)
 library(gganimate)
 library(glue)
+library(d2helper)
 
 
-source("parameters.R")
-```
-
-```{r}
-# load dev version of d2helper
-devtools::load_all("~/workspace/d2helper")
 ```
 
 ```{r}
 # load data
-# load(glue("{membershipId}-data/PGCRdata"))
+source("parameters.R")
 load_pgcr_data(membershipId)
 
 ```
 
 
+## Experiment with making racing bar charts
+
+`animate_history` builds an animated "racing" bar chart showing change in total weapon usage over time. Specify game mode via the `activity_type` parameter. 
 
 ```{r}
+#| eval: false
+#| echo: true
+
+# display to console or in output such as quarto
 levelWeapon |>
   animate_history(activity_type = 82, limit=30, label="Dungeon weapons over time")
 
+# various uses of prefix, gif and mp4 parameters will control output
+# use mp4=TRUE and/or gif=TRUE to output to file
+# optionally pass a string to prefix to prepend it to the output filename
 levelWeapon |> 
-  animate_history(activity_type=19, limit=30, label="Iron Banner kills", prefix="ib")
+  animate_history(activity_type=19, limit=30, label="Iron Banner kills", prefix="ib", mp4=TRUE)
 levelWeapon |>
-  animate_history(activity_type="4", label="Raid kills", prefix="raid", gif=TRUE)
+  animate_history(activity_type=4, label="Raid kills", prefix="raid", gif=TRUE)
 levelWeapon |>
-  animate_history(activity_type="82", limit=30, label="Dungeon kills", mp4=TRUE)
+  animate_history(activity_type=82, limit=30, label="Dungeon kills", mp4=TRUE)
 levelWeapon |>
-  animate_history(activity_type="46", limit=30, label="GM NF? kills", prefix="gm", gif=TRUE)
+  animate_history(activity_type=46, limit=30, label="GM NF? kills", prefix="gm", gif=TRUE)
 levelWeapon |> 
-  animate_history(activity_type = "5", label="All PVP Ever!", gif=TRUE)
+  animate_history(activity_type = 5, label="All PVP Ever!", gif=TRUE)
 
 ```
+
+For example, the Raid Kills example above produces this:
+
+![](images/D2Rstats-raid_weapons.gif)
 
