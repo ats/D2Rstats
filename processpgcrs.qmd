@@ -332,9 +332,9 @@ These are the most recent 50 weapon-level records in the full game data we now h
 ```{r}
 levelWeapon |>
  mutate(date = lubridate::date(period)) |> 
-  select(date, displayName, instanceId, mode=displayProperties.name.x, weapon=itemName, 
+  select(period, date, displayName, instanceId, mode=displayProperties.name.x, weapon=itemName, 
          kills=uniqueWeaponKills) |> 
-  arrange(desc(date)) |> head(n=50) |> select(-instanceId) |>
+  arrange(desc(period)) |> head(n=50) |> select(-instanceId, -period) |>
   DT::datatable(style="auto")
 ```
 
