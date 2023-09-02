@@ -179,47 +179,17 @@ levelActivity |> # filter(instanceId %in% c(13752462421, 13752364856)) |>
   # limit to only player-specific rows
   player_build <- player_build |> filter(pgcr_membership_id == membershipId)
 
-# here pipe the exploded data into a function that will complete the character information
-# by 1) checking stored data set for character; 2) API fetching character data if not found;
-# 3) storing retrieved data to local data set
-  
-  # manage_characters <- function(.data) {
-  #   # set up character data set if needed
-  #   char_file <- glue::glue("{membershipId}-data/characters_data.csv")
-  #   if(fs::file_exists(char_file)) {
-  #     load(char_file)
-  #   } else {
-      # we need to make first build of character data
-      # this should make the set of unique characters found
-      characters_data <-
-        player_build |> unnest_auto(displayName) |> unnest_auto(characterClass) |> 
-          unnest_auto(emblemHash) |>
-          select(pgcr_membership_id, displayName, characterClass, characterId) |>
-          unique()
-      player_build <- player_build |> 
-        select(-pgcr_membership_id, -displayName, -characterClass) |>
-        left_join(characters_data, join_by(characterId))
-    # } 
+  characters_data <-
+    player_build |> unnest_auto(displayName) |> unnest_auto(characterClass) |> 
+      unnest_auto(emblemHash) |>
+      select(pgcr_membership_id, displayName, characterClass, characterId) |>
+      unique()
+    player_build <- player_build |> 
+      select(-pgcr_membership_id, -displayName, -characterClass) |>
+      left_join(characters_data, join_by(characterId))
     
-    # for each unique characterId, check saved characters for match
-    
-    
-  # }
-  
-  
-  # unnest_auto(destinyUserInfo) |> 
-  # unnest_auto(membershipId) |>
-  # mutate(pgcr_membership_id =
-  #   membershipId) |> select(-membershipId) |> filter(pgcr_membership_id == membershipId) |>
-  # unnest_auto(characterId)
-  
-  # unnest_auto(characterClass) |>
-  # unnest_auto(classHash) |>
-  # unnest_auto(characterId) |>
-  # #select(period, displayName, classHash, 
-  #       values, extended) |>
-      player_build |>
-  unnest_wider(values, names_sep = "_") |>
+  player_build |>
+    unnest_wider(values, names_sep = "_") |>
   # performance block
     raise("values_standing", standing) |>
     raise(unnest="values_kills", kills) |> 
