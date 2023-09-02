@@ -418,7 +418,7 @@ levelWeapon |>
  mutate(date = lubridate::date(period)) |> 
   select(period, date, displayName, instanceId, mode=displayProperties.name.x, weapon=itemName, 
          kills=uniqueWeaponKills) |> 
-  arrange(desc(period)) |> head(n=50) |> select(-instanceId, -period) |>
+  arrange(desc(period)) |> head(n=100) |> select(-instanceId, -period) |>
   DT::datatable(style="auto")
 ```
 
