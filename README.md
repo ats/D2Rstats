@@ -16,10 +16,15 @@ Running `processpgcrs.qmd` builds an html file containing recent history and som
 
 ![A more customized Iron Banner history example](images/D2Rstats-iron_banner_example.png)
 
+The `experiments.qmd` notebook shows how to produce animated racing barplots such as this one:
+
+![](images/D2Rstats-raid_weapons.gif)
+
 ## Requirements
 
 -   You'll need an API key from the Destiny 2 API, available by [creating an application here](https://www.bungie.net/en/Application).
 -   An R environment with needed libraries installed
+-   Additionally, you'll need to install my [{d2helper}](https://github.com/ats/d2helper) library: `devtools::install_github("ats/d2helper")`
 -   [Quarto](https://quarto.org) installed
 
 If you're not familiar with R and Quarto, I recommend using RStudio, as it will prompt you to install needed libraries. There are also good Quarto modes for Emacs and VSCode.

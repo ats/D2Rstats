@@ -15,6 +15,14 @@ embed-resources: true
 source("parameters.R")
 ```
 
+```{r}
+# temp: load d2helper
+# devtools::load_all("~/workspace/d2helper")
+
+# install d2helper with
+# devtools::install_github("ats/d2helper")
+library(d2helper)
+```
 
 # Build PGCR data set for `r filterName`
 
@@ -67,7 +75,7 @@ toc()
 
 Running using the following filter criteria:
 
--   PGCRs \> date: **`r dateGE`**
+-   PGCRs > date: **`r dateGE`**
 -   Gamertag: **`r filterName`**
 
 ```{r}
@@ -90,43 +98,6 @@ filterMode <- ""                  # Example modes to filter for:
 
 ```
 
-## Set up utility functions: `raise()` and `modeIn()`
-
-The first of these functions is used to simplify repeated calls to get nested data from a common parent node in the manifest. The second function is for checking whether a specific game mode is found within an activity entry.
-
-```{r}
-raise <- function(.data, unnest, label, displayValue = TRUE) {
-  # unnest is list element whose basic.displayValue field we will bring up
-  if (!is.data.frame(.data)) {
-        abort("`.data` must be a data frame.")
-  }
-  if (!is.logical(displayValue)) {
-    abort("`displayValue` must be a boolean; True to use the displayValue component, False to use the raw value.")
-  }
-  if (displayValue == TRUE) {
-    # default
-    unnest_wider(.data, unnest) |> 
-    unnest_wider(basic) |>
-    unnest_longer(displayValue, keep_empty = TRUE) |>
-    mutate("{{label}}" := displayValue) |>
-    select(-displayValue, -value)
-  } else {
-    # if displayValue is false, use `value` rather than `displayValue`
-    unnest_wider(.data, unnest) |> 
-    unnest_wider(basic) |>
-    unnest_auto(value) |>
-    mutate("{{label}}" := value) |>
-    select(-displayValue, -value)
-  }
-}
-
-# function to filter on activity types
-modeIn <- function(mode, modeString) {
-  mode %in% c(stringi::stri_split(modeString, fixed="|", simplify=TRUE))
-}
-
-
-```
 
 ## Activity information
 
@@ -166,7 +137,8 @@ levelActivity |> select(-mode) |> # remove unneeded single mode column
   if (filterMode != "") {
     levelActivity |>
       rowwise() |>
-      filter(modeIn(filterMode, modeString)) ->
+      #filter(modeIn(filterMode, modeString)) ->
+      filter(filter_mode(filterMode)) ->
       levelActivity
   }
 
@@ -187,7 +159,55 @@ We build out per-player per-activity data now:
 -   this can add rows because it splits into character-per-activity information
 
 ```{r}
+#| eval: true
+# Fix issue of PGCRs being dropped when they contain too many players for all 
+# character information to be provided
+
+levelActivity |> # filter(instanceId %in% c(13752462421, 13752364856)) |> 
+  unnest_longer(entries) |> # select(period, entries) |>
+  unnest_auto(entries) |>
+  unnest_auto(player) |>
+  unnest_auto(destinyUserInfo) |> # opens up displayName and membershipId fields
+  unnest_auto(membershipId) |>    # above is minimum to get to membershipId
+                                  # after which I can filter for players by that Id
+  rename(pgcr_membership_id = membershipId) |>
+  unnest_auto(characterId) ->
+  ### save to ###
+  player_build
+
+  # filter to membershipId before sending to manage_characters
+  # limit to only player-specific rows
+  player_build <- player_build |> filter(pgcr_membership_id == membershipId)
+
+  characters_data <-
+    player_build |> unnest_auto(displayName) |> unnest_auto(characterClass) |> 
+      unnest_auto(emblemHash) |>
+      select(pgcr_membership_id, displayName, characterClass, characterId) |>
+      unique()
+    player_build <- player_build |> 
+      select(-pgcr_membership_id, -displayName, -characterClass) |>
+      left_join(characters_data, join_by(characterId))
+    
+  player_build |>
+    unnest_wider(values, names_sep = "_") |>
+  # performance block
+    raise("values_standing", standing) |>
+    raise(unnest="values_kills", kills) |> 
+    raise(unnest="values_deaths", deaths) |>
+    raise("values_killsDeathsRatio", kdr) |>
+    raise("values_killsDeathsAssists", kda) |>
+    raise("values_timePlayedSeconds", timePlayed, displayValue = FALSE) |>
+    raise("values_score", score) |>          
+    raise("values_teamScore", teamScore) ->
+        levelPlayer
+
+
+```
+
+
+```{r}
 #| include: false
+#| eval: false
 tic()
 levelActivity |>
   # character info block
@@ -195,18 +215,23 @@ levelActivity |>
   unnest_auto(entries) |>
   unnest_auto(player) |>
   unnest_auto(destinyUserInfo) |> 
-  unnest_auto(displayName) ->
+  unnest_auto(membershipId) ->
+  #unnest_auto(displayName) ->
     levelPlayer
+
+  levelPlayer <- levelPlayer |> mutate(pgcr_membership_id =
+    membershipId) |> select(-membershipId)
 
   # quick break to filter on name if specified
 if(filterName != "") {
-    levelPlayer |> filter(displayName == filterName) ->
+    levelPlayer |> filter(pgcr_membership_id == membershipId) ->
+    #levelPlayer |> filter(displayName == "TestApparatus") ->
     levelPlayer
 }
 
 # resume main data creation
 levelPlayer |>
-  unnest_auto(membershipId) |>
+  # unnest_auto(membershipId) |>
   unnest_auto(characterClass) |>
   unnest_auto(classHash) |>
   unnest_auto(characterId) |>
@@ -230,6 +255,7 @@ head(levelPlayer)
 ```
 
 ```{r}
+#| eval: false
 #| echo: false
 #| include: false
 # find a specific player from levelPlayer
@@ -330,22 +356,27 @@ dbDisconnect(db)
 # levelWeapon is the full data set used in the rest of the notebook;
 # save off a copy for easy re-use without rebuilding from PGCRs
 
-if(!fs::dir_exists(glue("{membershipId}-data")))
-{
-  fs::dir_create(glue("{membershipId}-data"))  
-}
-save(levelWeapon, file=glue("{membershipId}-data/PGCRdata"))
+# if(!fs::dir_exists(glue("{membershipId}-data")))
+# {
+#   fs::dir_create(glue("{membershipId}-data"))  
+# }
+# save(levelWeapon, file=glue("{membershipId}-data/PGCRdata"))
+
+save_pgcr_data(membershipId, levelWeapon)
 ```
 
 ```{r}
 #| eval: false
 # Load user-specific saved data
 # This allows skipping load/process steps above to re-use preprocessed data
-if(fs::file_exists(glue("{membershipId}-data/PGCRdata"))) {
-  load(glue("{membershipId}-data/PGCRdata"))
-} else {
-  print("No stored PGCR data set found.\n")
-}
+# if(fs::file_exists(glue("{membershipId}-data/PGCRdata"))) {
+#   load(glue("{membershipId}-data/PGCRdata"))
+# } else {
+#   print("No stored PGCR data set found.\n")
+#}
+
+load_pgcr_data(membershipId)
+
 ```
 
 # Display recent history
@@ -355,9 +386,9 @@ These are the most recent 50 weapon-level records in the full game data we now h
 ```{r}
 levelWeapon |>
  mutate(date = lubridate::date(period)) |> 
-  select(date, displayName, instanceId, mode=displayProperties.name.x, weapon=itemName, 
+  select(period, date, displayName, instanceId, mode=displayProperties.name.x, weapon=itemName, 
          kills=uniqueWeaponKills) |> 
-  arrange(desc(date)) |> head(n=50) |> select(-instanceId) |>
+  arrange(desc(period)) |> head(n=100) |> select(-instanceId, -period) |>
   DT::datatable(style="auto")
 ```
 
@@ -374,106 +405,15 @@ levelWeapon |> select(instanceId) |> unique() |> count()
 # weapon_barplot
 # weapon_combovis
 
-weapon_treemap <- function(data=NULL, type=NULL, 
-                           tier_weapon = NULL, mode = NULL,
-                           limit=200, title=NULL,
-                           subtitle=NULL
-                           ) 
-  {
-   if (!is.null(mode)) {
-     #print("filtering on mode\n")
-     data |> 
-       rowwise() |> filter(modeIn(mode, modeString)) -> data
-     #  print(data |> select(modeString) |> unique())
-   }
-  
-   if (!is.null(tier_weapon)) {
-     data |> filter(tier==tier_weapon) -> data
-     #subtitle <- tier_weapon
-   }
-  
-   if (!is.null(type)) {
-     data |> rowwise() |>
-       filter(itemType==type) -> data
-     # panel_subtitle <- paste0("type: ", type)
-   }
-  
-   data |> 
-    group_by(itemName, itemType) |> tally(as.numeric(uniqueWeaponKills), name="total") |>
-  ungroup() |>
-  filter(total >= limit) |>
-  ggplot(aes(area=total, fill=total, label=as.factor(itemName), 
-             subgroup=as.factor(itemType))) +
-     geom_treemap(start="topleft") + 
-  geom_treemap_subgroup_border(start="topleft") +
-  geom_treemap_subgroup_text(start="topleft", place = "centre", grow = T, alpha = 0.5, colour =
-                            "yellow", fontface = "italic", min.size = 0) +
-  geom_treemap_text(start="topleft", colour = "gray", place = "topleft", reflow = T) + 
-  ggtitle(title, subtitle) + theme(legend.position = "none")
-}
 
-weapon_barplot <- function(data=NULL, type=NULL, 
-                           tier_weapon = NULL, mode = NULL,
-                           limit=5, 
-                           ncol=2,
-                           text_size=2,
-                           title=NULL,
-                           subtitle=NULL
-                           ) 
-  {
-   if (!is.null(mode)) {
-     #print("filtering on mode\n")
-     data |> 
-       rowwise() |> filter(modeIn(mode, modeString)) -> data
-       #print(data |> select(modeString) |> unique())
-   }
-  
-   if (!is.null(tier_weapon)) {
-     data |> filter(tier==tier_weapon) -> data
-     #subtitle <- tier_weapon
-   }
-  
-   if (!is.null(type)) {
-     data |> rowwise() |>
-       filter(itemType==type) -> data
-     # panel_subtitle <- paste0("type: ", type)
-   }
- 
- # make sorted levels 
- itemtype_levels <- data |> group_by(itemType) |> summarise(total = sum(as.numeric(uniqueWeaponKills))) |> arrange(desc(total)) |> select(itemType)
- # print(itemtype_levels$itemType)
- 
- data |> group_by(itemType, itemName) |> summarise(total = sum(as.numeric(uniqueWeaponKills))) |> 
-  
-  arrange(desc(total)) |>group_by(itemType) |> slice_head(n=limit) |>
-  ggplot(aes(x=total, y=forcats::fct_reorder(itemName, total))) +
-     # theme_dark() +
-     geom_col() + facet_wrap(.~factor(itemType, levels=itemtype_levels$itemType), 
-                             scales="free_y", ncol = ncol) +
-     # theme(strip.text = element_blank()) +
-     theme(strip.text.x = element_text(
-       margin = margin( b = 0, t = 0) 
-     )) +
-     theme(axis.title = element_blank()) +
-     theme(axis.text.x = element_text(size=5)) +
-     theme(axis.text.y = element_blank()) +
-     theme(axis.ticks.y = element_blank()) +
-     # theme(axis.text.y = element_text(size = 6)) +
-     # scale_y_discrete(position="left", 
-     #                  label = function(x) stringr::str_trunc(x, 15)) +
-     geom_text(aes(x=max(total), label=forcats::fct_reorder(itemName, total)), hjust=1, size=text_size) +
-   ggtitle(title, subtitle)
-  
-}
-
-weapon_duoplot <- function(p1, p2, width_1=1, width_2=1,
-                             panel_title=NULL,
-                             panel_subtitle=NULL,
-                           panel_caption=NULL)
-{
-  p1 + p2 + plot_layout(widths = c(width_1, width_2)) + 
-    plot_annotation(panel_title, panel_subtitle)
-}
+# weapon_duoplot <- function(p1, p2, width_1=1, width_2=1,
+#                              panel_title=NULL,
+#                              panel_subtitle=NULL,
+#                            panel_caption=NULL)
+# {
+#   p1 + p2 + plot_layout(widths = c(width_1, width_2)) + 
+#     plot_annotation(panel_title, panel_subtitle)
+# }
 ```
 
 # Weapon usage plots
@@ -563,13 +503,14 @@ pvp2 <- NULL
 pvp3 <- NULL
 
 ## only try PVP stats if there are PVP games in the data
-if(modeIn(5, levelWeapon$modeString)) {
-  # get year range
+# if(modeIn(5, levelWeapon$modeString)) {
+if(nrow(filter_mode(levelWeapon, mode=5) > 0)) {
 
   pvp_games <- levelWeapon |>
     mutate(date = lubridate::as_date(period)) |>
     group_by(instanceId) |>
-    filter(modeIn(5, modeString)) |>
+    filter_mode(5) |>
+    #filter(modeIn(5, modeString)) |>
     select(instanceId, period, date, characterId, teamScore, characterClass,
            #outcome,
            standing,
@@ -645,9 +586,10 @@ pvp3
 # and annotated with caption calling out
 # these as the games for Gilded title
 pvp_games |>
-  filter(date >= as.Date("2023-06-01"),
-         date < as.Date("2023-06-15"),
-         characterClass == "Hunter"
+  filter(date >= as.Date("2023-06-01") &
+         date < as.Date("2023-06-15") &
+         characterClass == "Hunter" &
+         displayProperties.name.x == "Iron Banner"
          ) |>
   ggplot(aes(x=date, y=as.numeric(kda), color=standing, size=score)) +
     geom_hline(yintercept = 1, color="white") +
