@@ -159,7 +159,85 @@ We build out per-player per-activity data now:
 -   this can add rows because it splits into character-per-activity information
 
 ```{r}
+#| eval: true
+# Fix issue of PGCRs being dropped when they contain too many players for all 
+# character information to be provided
+
+levelActivity |> # filter(instanceId %in% c(13752462421, 13752364856)) |> 
+  unnest_longer(entries) |> # select(period, entries) |>
+  unnest_auto(entries) |>
+  unnest_auto(player) |>
+  unnest_auto(destinyUserInfo) |> # opens up displayName and membershipId fields
+  unnest_auto(membershipId) |>    # above is minimum to get to membershipId
+                                  # after which I can filter for players by that Id
+  rename(pgcr_membership_id = membershipId) |>
+  unnest_auto(characterId) ->
+  ### save to ###
+  player_build
+
+  # filter to membershipId before sending to manage_characters
+  # limit to only player-specific rows
+  player_build <- player_build |> filter(pgcr_membership_id == membershipId)
+
+# here pipe the exploded data into a function that will complete the character information
+# by 1) checking stored data set for character; 2) API fetching character data if not found;
+# 3) storing retrieved data to local data set
+  
+  # manage_characters <- function(.data) {
+  #   # set up character data set if needed
+  #   char_file <- glue::glue("{membershipId}-data/characters_data.csv")
+  #   if(fs::file_exists(char_file)) {
+  #     load(char_file)
+  #   } else {
+      # we need to make first build of character data
+      # this should make the set of unique characters found
+      characters_data <-
+        player_build |> unnest_auto(displayName) |> unnest_auto(characterClass) |> 
+          unnest_auto(emblemHash) |>
+          select(pgcr_membership_id, displayName, characterClass, characterId) |>
+          unique()
+      player_build <- player_build |> 
+        select(-pgcr_membership_id, -displayName, -characterClass) |>
+        left_join(characters_data, join_by(characterId))
+    # } 
+    
+    # for each unique characterId, check saved characters for match
+    
+    
+  # }
+  
+  
+  # unnest_auto(destinyUserInfo) |> 
+  # unnest_auto(membershipId) |>
+  # mutate(pgcr_membership_id =
+  #   membershipId) |> select(-membershipId) |> filter(pgcr_membership_id == membershipId) |>
+  # unnest_auto(characterId)
+  
+  # unnest_auto(characterClass) |>
+  # unnest_auto(classHash) |>
+  # unnest_auto(characterId) |>
+  # #select(period, displayName, classHash, 
+  #       values, extended) |>
+      player_build |>
+  unnest_wider(values, names_sep = "_") |>
+  # performance block
+    raise("values_standing", standing) |>
+    raise(unnest="values_kills", kills) |> 
+    raise(unnest="values_deaths", deaths) |>
+    raise("values_killsDeathsRatio", kdr) |>
+    raise("values_killsDeathsAssists", kda) |>
+    raise("values_timePlayedSeconds", timePlayed, displayValue = FALSE) |>
+    raise("values_score", score) |>          
+    raise("values_teamScore", teamScore) ->
+        levelPlayer
+
+
+```
+
+
+```{r}
 #| include: false
+#| eval: false
 tic()
 levelActivity |>
   # character info block
@@ -167,18 +245,23 @@ levelActivity |>
   unnest_auto(entries) |>
   unnest_auto(player) |>
   unnest_auto(destinyUserInfo) |> 
-  unnest_auto(displayName) ->
+  unnest_auto(membershipId) ->
+  #unnest_auto(displayName) ->
     levelPlayer
+
+  levelPlayer <- levelPlayer |> mutate(pgcr_membership_id =
+    membershipId) |> select(-membershipId)
 
   # quick break to filter on name if specified
 if(filterName != "") {
-    levelPlayer |> filter(displayName == filterName) ->
+    levelPlayer |> filter(pgcr_membership_id == membershipId) ->
+    #levelPlayer |> filter(displayName == "TestApparatus") ->
     levelPlayer
 }
 
 # resume main data creation
 levelPlayer |>
-  unnest_auto(membershipId) |>
+  # unnest_auto(membershipId) |>
   unnest_auto(characterClass) |>
   unnest_auto(classHash) |>
   unnest_auto(characterId) |>
@@ -202,6 +285,7 @@ head(levelPlayer)
 ```
 
 ```{r}
+#| eval: false
 #| echo: false
 #| include: false
 # find a specific player from levelPlayer
