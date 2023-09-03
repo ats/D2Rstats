@@ -381,7 +381,7 @@ load_pgcr_data(membershipId)
 
 # Display recent history
 
-These are the most recent 50 weapon-level records in the full game data we now have available in `levelWeapon`:
+These are the most recent 100 weapon-level records in the full game data we now have available in `levelWeapon`:
 
 ```{r}
 levelWeapon |>
