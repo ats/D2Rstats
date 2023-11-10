@@ -40,6 +40,7 @@ pfile <- "parameters.R"
 source(pfile)
 
 api_root <- "https://www.bungie.net/Platform"
+stats_root <- "https://stats.bungie.net/Platform"
 
 glue("Getting data for ID {membershipId}")
 
@@ -98,10 +99,10 @@ if (!dir.exists(pcgrPath)) {
 # we now have `existingActivities` available 
 
 get_activities <- function(count, page, characterId, membershipId, 
-                           membershipType, mode, api_root, API_KEY) {
+                           membershipType, mode, stats_root, API_KEY) {
   # print(glue("req_char: {characterId}, page: {page}"))
   stats_request_path <-
-    glue("{api_root}/Destiny2/{membershipType}/Account/{membershipId}/Character/{characterId}/Stats/Activities")
+    glue("{stats_root}/Destiny2/{membershipType}/Account/{membershipId}/Character/{characterId}/Stats/Activities")
   
   # print(stats_request_path)
   stats_req <- request(stats_request_path)
@@ -124,6 +125,7 @@ activities_parallel <- foreach(char = characters$characterId) %dopar% {
   # for dopar
   source(pfile)
   api_root <- "https://www.bungie.net/Platform"
+  stats_root <- "https://stats.bungie.net/Platform"
   # /
   
   breakPage <- FALSE
@@ -136,7 +138,7 @@ activities_parallel <- foreach(char = characters$characterId) %dopar% {
   while(breakPage == FALSE) { #& req_page < 100) {
     # print(glue("req_char: {req_char}, page: {req_page}"))
     stats_resp <- get_activities(250, req_page, req_char, 
-                 membershipId, membershipType, "None", api_root, API_KEY)
+                 membershipId, membershipType, "None", stats_root, API_KEY)
     
     if (!is.null(resp_body_json(stats_resp)$Response$activities)) { 
     # TRUE if there is no data in the page returned
@@ -193,7 +195,7 @@ library(furrr)
 
 get_pgcr <- function(activity) {
   pgcr_request_path <-
-    glue("{api_root}/Destiny2/Stats/PostGameCarnageReport/{activity}/")
+    glue("{stats_root}/Destiny2/Stats/PostGameCarnageReport/{activity}/")
   pgcr_request <- request(pgcr_request_path)
   req_retry(pgcr_request, max_tries = 10) |>
     req_headers("X-API-Key" = API_KEY) |>
@@ -240,7 +242,7 @@ if (nrow(runActivitySet) > 0) {
     # Using future_map to parallelize
     future_map(activitySlice$value, get_pgcr, .progress = TRUE, .options =
       furrr_options(seed=TRUE, 
-      globals=c("API_KEY", "api_root", "membershipId", "pcgrPath"),
+      globals=c("API_KEY", "stats_root", "membershipId", "pcgrPath"),
       packages=c("httr2", "glue")))
     Sys.sleep(3) # quick snooze
   }
