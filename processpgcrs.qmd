@@ -493,6 +493,9 @@ weapon_treemap(levelWeapon, type="Scout Rifle", limit=100) +
   plot_layout(nrow=1, widths = c(3,1))
   
 ```
+```{r}
+weapon_barplot(levelWeapon, mode=4, ncol = 3, title = "Weapons used in raids") + weapon_treemap(levelWeapon, mode=4)
+```
 
 # PVP performance
 
@@ -582,23 +585,45 @@ pvp3
 
 # Here's a more detailed PVP example,
 # showing Iron Banner games for a specific character,
-# limited to the first IB week of season 2021,
+# limited to the first IB week of Episode Echoes (S24) 2024,
 # and annotated with caption calling out
 # these as the games for Gilded title
 pvp_games |>
-  filter(date >= as.Date("2023-06-01") &
-         date < as.Date("2023-06-15") &
+  filter(date >= as.Date("2024-07-01") &
+         date < as.Date("2024-07-15") &
          characterClass == "Hunter" &
-         displayProperties.name.x == "Iron Banner"
+         grepl("Iron Banner", displayProperties.name.x)
          ) |>
   ggplot(aes(x=date, y=as.numeric(kda), color=standing, size=score)) +
     geom_hline(yintercept = 1, color="white") +
     geom_quasirandom( varwidth = TRUE, width=.3, orientation = "x", alpha=.7) +
   theme_solarized_2(light=FALSE, base_family = font_family) +
   theme(legend.position = "none") +
-  labs(title = "Iron Banner #1, Season 21",
+  labs(title = "Iron Banner #1, Season 24 (Episode: Echoes)",
+       caption = "Wins & Losses / Scaled by player score",
+       subtitle = "The road to Gilded x 7, all games on Hunter",
+       y = "KDA", x=NULL)
+```
+```{r}
+#| eval: false
+#| echo: true
+
+# another variation on IB info; this will show data by character for the first
+# IB of season 23
+
+pvp_games |>
+  filter(date >= as.Date("2023-12-01") &
+         date < as.Date("2023-12-31") &
+         displayProperties.name.x == "Iron Banner"
+         ) |>
+  ggplot(aes(x=date, y=as.numeric(kda), color=standing, size=score, shape=characterClass)) +
+    geom_hline(yintercept = 1, color="white") +
+    geom_quasirandom( varwidth = TRUE, width=.3, orientation = "x", alpha=.7) +
+  theme_solarized_2(light=FALSE, base_family = font_family) +
+  theme(legend.position = "none") +
+  labs(title = "Iron Banner #1, Season 23",
        subtitle = "Wins & Losses / Scaled by player score",
-       caption = "The road to Gilded x 4, all games on Hunter",
+       caption = "The road to Gilded x 6",
        y = "KDA", x=NULL)
 ```
 

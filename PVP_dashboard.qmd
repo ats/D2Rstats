@@ -24,6 +24,8 @@ library(ggplot2)
 library(ggbeeswarm)
 library(ggthemes)
 library(plotly)
+library(kableExtra)
+
 source("parameters.R")
 load_pgcr_data(membershipId)
 
@@ -131,7 +133,7 @@ list(
 
 ## Row {height=35%}
 
-### Cell {width=65%}
+### Cell {width=60%}
 ```{r}
 ##| fig-height: 5)
 plotOutput("history_plot", click = "history_click")
@@ -247,26 +249,61 @@ output$history_item <- renderTable({
   req(input$history_click)
   # paste0(input$history_click$x, " ", input$history_click$y)
   point <- nearPoints(pvp_games, input$history_click, threshold=threshold) |> 
-    select(KDA=kda, super, grenade, melee) |> unique()
+    select(date, KDA=kda, super, grenade, melee) |> 
+    mutate(date=as.character(date)) |> unique()
   
-}, options = list(dom = 't'))
+}, spacing="xs", options = list(dom = 't'))
 
-output$history_detail <- renderTable({
+output$history_detail <- function() {
+  # kable function for nicer table
   validate(need(!is.na(input$history_click), ""))
   req(input$history_click)
-  # paste0(input$history_click$x, " ", input$history_click$y)
-  point <- nearPoints(pvp_games, input$history_click, threshold=threshold) |> select(instanceId, Weapon=itemName, Kills=uniqueWeaponKills) |> # |> group_by(instanceId) |> mutate(grouping = rep(c("A", "B"), length.out = n()))
-  select(-instanceId)
-}, options = list(dom = 't'))
+  point <- nearPoints(pvp_games, input$history_click, threshold=threshold) |> 
+    ungroup() |>
+    select(period, date, Weapon=itemName, Kills=uniqueWeaponKills) |> 
+    mutate(date=as.character(date)) |> 
+    mutate(grouping = as.integer(factor(period))) |> 
+    mutate(sequence = grouping %% 2) |>
+    arrange(period)
+  
+  # `sequence` is 1 or 0, allowing for alternating striping by group
+  point |> kable() |> kable_styling(bootstrap_options = c("hover", "condensed", "responsive")) |>
+    row_spec(which(point$sequence == 1), background = "lightgray") |>
+    remove_column(c(1, 5, 6))
+}
+
+# output$history_detail <- renderTable({
+#   validate(need(!is.na(input$history_click), ""))
+#   req(input$history_click)
+#   # paste0(input$history_click$x, " ", input$history_click$y)
+#   point <- nearPoints(pvp_games, input$history_click, threshold=threshold) |> select(instanceId, date, Weapon=itemName, Kills=uniqueWeaponKills) |> 
+#     # |> group_by(instanceId) |> mutate(grouping = rep(c("A", "B"), length.out = n()))
+#   mutate(date=as.character(date)) |>
+#   select(-instanceId)
+# }, spacing="xs", options = list(dom = 't'))
 
 ```
  
 # Comp PVP
 
+## row {height: 25%}
+Per [activity definition](https://bungie-net.github.io/multi/schema_Destiny-Definitions-DestinyActivityDefinition.html#schema_Destiny-Definitions-DestinyActivityDefinition), `69` corresponds to all competetive PVP modes:
 ```{r}
-pvp_games |> filter_mode(69) |> select(displayProperties.name.x, displayProperties.name.y, 
-                                       standing) |> 
+#| echo: true
+pvp_games |> filter_mode(69) |> 
+  select(displayProperties.name.x, displayProperties.name.y, standing) |> 
   group_by(displayProperties.name.x, displayProperties.name.y, standing) |>
   tally()
 ```
 
+```{r}
+#| eval: false
+#| show: false
+a <- head(pvp_games, n=100) |> select(instanceId) |> group_by(instanceId) |> 
+  mutate(grouping = cur_group_id()) |> mutate(sequence = grouping %% 2) 
+
+  a |> kable() |>
+  kable_styling() |>
+  row_spec(which(a$sequence==1), background = "lightgray")
+  
+```

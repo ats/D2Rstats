@@ -31,7 +31,7 @@ load_pgcr_data(membershipId)
 `animate_history` builds an animated "racing" bar chart showing change in total weapon usage over time. Specify game mode via the `activity_type` parameter. 
 
 ```{r}
-#| eval: false
+#| eval: true
 #| echo: true
 
 # display to console or in output such as quarto
