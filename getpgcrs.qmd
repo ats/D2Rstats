@@ -144,7 +144,7 @@ activities_parallel <- foreach(char = characters$characterId) %dopar% {
     # TRUE if there is no data in the page returned
     resp_body_json(stats_resp)$Response$activities |> as.tbl_json() |>
       spread_values(instanceId = jstring(activityDetails, instanceId), 
-                    mode = jstring(activityDetails, mode),
+                    mode = jinteger(activityDetails, mode),
                     period = jstring(period)) |> 
       as_tibble() |> # remove JSON attribute
       mutate(character = req_char) ->
