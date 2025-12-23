@@ -25,16 +25,25 @@ library(ggbeeswarm)
 library(ggthemes)
 library(plotly)
 library(kableExtra)
+library(bslib)
 
 source("parameters.R")
 load_pgcr_data(membershipId)
 
+comp_definition <- c( 80  , 37, 84, 59 , 37, 92, 38, 89, 69, 37, 38, 37)
 
 if(nrow(filter_mode(levelWeapon, mode=5) > 0)) {
   pvp_games <- levelWeapon |>
     mutate(date = lubridate::as_date(period), kda = as.numeric(kda)) |>
     group_by(instanceId) |> 
     filter_mode(5) |> ungroup()
+
+  pvp_games <- pvp_games |> rowwise() |> mutate(is_comp = any(as.character(comp_definition) %in% strsplit(modeString, "|", fixed=TRUE)[[1]] |
+    displayProperties.name.x == "Competitive"
+  )) |> ungroup()
+
+
+
 }
 
 ```
@@ -47,25 +56,33 @@ checkboxGroupInput("character_select", label=NULL,
                    inline=TRUE)
 ```
 
+## comp/quick
+```{r}
+checkboxGroupInput("comp_filter", label=NULL,
+  choiceNames = c("Comp", "Non-Comp"),
+  choiceValues = c(TRUE, FALSE),
+  selected = c(TRUE, FALSE)
+)
+```
+
 ### game modes
 ```{r}
 checkboxGroupInput("game_select", label=NULL, 
                    choices= c(pvp_games$displayProperties.name.y |> unique()), 
-                   selected=c(pvp_games$displayProperties.name.y |> unique()), 
+                   selected=c("Iron Banner", "The Crucible", "Control", "Trials of Osiris", "Clash"), 
+                   #selected=c(pvp_games$displayProperties.name.y |> unique()), 
                    inline=FALSE)
 ```
 
-### date range
-```{r}
-sliderInput("date_range", "Drag either end or whole range", min=min(pvp_games$date), max=max(pvp_games$date),
-            value=c(max(pvp_games$date)-365, max=max(pvp_games$date)))
-```
 
 # Lifetime PVP
 
 ## Row {height=20%}
 
 ```{r}
+##| context: server
+#| 
+#games <- pvp_games |> filter(date >= input$date_range[1] & date <= input$date_range[2]) |> select(kda, characterClass, instanceId) 
 
 lifetime_kda <- pvp_games |> 
   select(kda, characterClass, instanceId) |> unique() |>
@@ -99,6 +116,31 @@ list(
 ```
 
 ```{r}
+value_box(
+  id = "dynamic_card",
+  title = "Filtered KDA",
+  value = textOutput("dynamic_kda"),
+  color = "primary"
+)
+```
+
+```{r}
+#| context: server
+dynamic_kda <- reactive({
+  pvp_games |> filter(date >= input$date_range[1] & date <= input$date_range[2] & 
+    characterClass %in% input$character_select &
+    displayProperties.name.y %in% input$game_select &
+    is_comp %in% input$comp_filter) |> 
+  select(kda, characterClass, instanceId) |> 
+  unique() |>
+  summarise(kda=mean(as.numeric(kda))) |> 
+  as.numeric() |>
+  round(2)
+})
+output$dynamic_kda <- renderText({dynamic_kda()})
+```
+
+```{r}
 #| content: valuebox
 #| title: "Lifetime games"
 
@@ -119,7 +161,7 @@ list(
 )
 ```
 
-```{r}
+<!-- ```{r}
 #| content: valuebox
 #| title: "Least played"
 list(
@@ -127,11 +169,16 @@ list(
   value = least_type_string
 )
 ```
+--> 
 
 
+## Row {height=15%}
+```{r}
+sliderInput("date_range", "", min=min(pvp_games$date), max=max(pvp_games$date), 
+  width="100%", value=c(max(pvp_games$date)-365, max=max(pvp_games$date)))
+```
 
-
-## Row {height=35%}
+## Row {height=50%}
 
 ### Cell {width=60%}
 ```{r}
@@ -202,9 +249,10 @@ output$history_plot <- renderPlot({
 pvp_games |> 
   filter(date >= input$date_range[1] & date <= input$date_range[2] &
            characterClass %in% input$character_select &
-           displayProperties.name.y %in% input$game_select) |> 
+           displayProperties.name.y %in% input$game_select &
+           is_comp %in% input$comp_filter) |> 
   select(date, standing, score, characterClass, kda, displayProperties.name.x) |> unique() |>
-  ggplot(aes(x=date, y=kda, color=standing, shape=factor(characterClass))) +
+  ggplot(aes(x=date, y=kda, color=standing, shape=characterClass)) +
     geom_point(size=3) +
     geom_beeswarm() +
     geom_hline(aes(yintercept = mean(kda)), color="yellow") +
@@ -213,7 +261,7 @@ pvp_games |>
     theme_solarized_2(light=FALSE, base_family = font_family) +
     theme(legend.position = "bottom", legend.direction = "horizontal") +
     labs(title = "PVP History",
-         subtitle = glue("Wins & Losses / Scaled by player score"),
+         subtitle = glue("Wins & Losses, by KDA"),
          y = "KDA", x=NULL)
 
 })
@@ -223,7 +271,8 @@ output$weapons_plot <- renderPlot({
   pvp_games |> 
   filter(date >= input$date_range[1] & date <= input$date_range[2] &
            characterClass %in% input$character_select & 
-           displayProperties.name.y %in% input$game_select) |>
+           displayProperties.name.y %in% input$game_select &
+           is_comp %in% input$comp_filter) |>
     weapon_barplot(ncol = 4, type_n = 8, text_size = 0) + 
       theme_solarized_2(light=FALSE, base_family = font_family) + 
       theme(axis.text.y = element_text(colour = "white", size = 12),
@@ -286,24 +335,84 @@ output$history_detail <- function() {
  
 # Comp PVP
 
-## row {height: 25%}
-Per [activity definition](https://bungie-net.github.io/multi/schema_Destiny-Definitions-DestinyActivityDefinition.html#schema_Destiny-Definitions-DestinyActivityDefinition), `69` corresponds to all competetive PVP modes:
+## Comp history
+
 ```{r}
-#| echo: true
-pvp_games |> filter_mode(69) |> 
+#| echo: false
+#| eval: false
+
+
+ pvp_games |> 
+  filter(comp_definition %in% modeString) |> 
   select(displayProperties.name.x, displayProperties.name.y, standing) |> 
   group_by(displayProperties.name.x, displayProperties.name.y, standing) |>
   tally()
 ```
 
+##
+
+```{r}
+pvp_games |>
+  filter(is_comp == TRUE) |>
+  #filter(displayProperties.name.x == "Competitive") |>
+  arrange(desc(date)) |> 
+  mutate(date = lubridate::date(period)) |> 
+  select(period, date, displayName, modeString, instanceId, 
+    mode=displayProperties.name.x, weapon=itemName, 
+    kills=uniqueWeaponKills) |> 
+  arrange(desc(period)) |> #head(n=1000) |> #select(-instanceId, -period) |>
+  group_by(instanceId) |> 
+  mutate(grouping = cur_group_id()) |> mutate(sequence = grouping %% 2) |>
+  DT::datatable(style="auto",
+  rownames = FALSE,
+  options=list(columnDefs = list(list(visible=FALSE, targets=c("period", "modeString", "instanceId", "grouping", "sequence"))))
+  ) |>
+   DT::formatStyle('sequence', target="row", 
+  backgroundColor = DT::styleEqual(c(0,1), c("white", "lightgray")))
+
+```
+
 ```{r}
 #| eval: false
 #| show: false
-a <- head(pvp_games, n=100) |> select(instanceId) |> group_by(instanceId) |> 
+
+# this is trying to shade groups of rows by game
+a <- head(pvp_games, n=500) |> select(instanceId) |> group_by(instanceId) |> 
   mutate(grouping = cur_group_id()) |> mutate(sequence = grouping %% 2) 
 
-  a |> kable() |>
-  kable_styling() |>
-  row_spec(which(a$sequence==1), background = "lightgray")
+  # a |> kable() |>
+  # #kable_styling(stripe_color="white") |>
+  # row_spec(which(a$sequence==1), background = "lightgray") # |>
+  # # row_spec(which(a$sequence==0), background = "white")
   
+a |> DT::datatable() |>
+  DT::formatStyle('sequence', target="row", 
+  backgroundColor = DT::styleEqual(c(0,1), c("white", "lightgray")))
+
+
+```
+
+## Comp game modes
+
+| num | label |
+|-----|------|
+| 80 | Elimination |
+| 37 | Survival |
+| 84 | Trials |
+|59 | Showdown |
+| 37 | Survival |
+| 92 | Relic? |
+| 38 | Survival |
+| 89 | Competitive |
+| 69 | Competitive |
+| 37 | Survival freelance |
+| 38 | Countdown |
+| 37 | Glory: survival |
+
+```{r}
+#| eval: false
+
+# snip to summarize game types to identify comp
+pvp_games |> summarize(n=n(), .by=c("modeString", "displayProperties.name.x", "is_comp")) |> DT::datatable()
+
 ```

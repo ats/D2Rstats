@@ -76,6 +76,7 @@ toc()
 Running using the following filter criteria:
 
 -   PGCRs > date: **`r dateGE`**
+-   PGCRs < date: **`r date_before`**
 -   Gamertag: **`r filterName`**
 
 ```{r}
@@ -84,8 +85,10 @@ Running using the following filter criteria:
 
 # deprecated in favor of building this all into parameters
 
-dateGE = "2017-09-06"             # date in YYYY-mm-dd
+dateGE <- "2024-01-01"             # date in YYYY-mm-dd
                                   # will filter to activity date >= to this
+# date_before = lubridate::today()
+date_before <- "2021-01-31"
 
 filterName <- ""                  # set gamer tag to filter;
                                   # otherwise you'll get *all* player data
@@ -105,6 +108,10 @@ Build a full `levelActivity` data set to allow for filtering by mode and date. T
 
 ```{r}
 #| include: false
+
+date_before
+
+
 tic()
 tbljson |> unnest_wider(..JSON) |> select(period, activityDetails, entries) |>
   # activity-level information
@@ -113,6 +120,11 @@ tbljson |> unnest_wider(..JSON) |> select(period, activityDetails, entries) |>
 
   if(dateGE != "") {
     temptbl |> filter(period >= dateGE) ->
+      temptbl
+  }
+
+  if(date_before != "") {
+    temptbl |> filter(period <= date_before) ->
       temptbl
   }
 
@@ -319,6 +331,7 @@ levelWeapon <- levelWeapon |> select(!where(is.list))
 
 ```{r}
 #| include: false
+#| eval: false
 paint::paint(levelWeapon)
 ```
 
@@ -500,7 +513,6 @@ weapon_barplot(levelWeapon, mode=4, ncol = 3, title = "Weapons used in raids") +
 # PVP performance
 
 ```{r}
-
 pvp1 <- NULL
 pvp2 <- NULL
 pvp3 <- NULL
@@ -552,7 +564,8 @@ if(nrow(filter_mode(levelWeapon, mode=5) > 0)) {
     
 if("Iron Banner" %in% pvp_games$displayProperties.name.x) {
   pvp3 <- pvp_games |>
-    filter(displayProperties.name.x == "Iron Banner") |>
+    filter(grepl("Iron Banner", displayProperties.name.x)) |>
+    #filter(displayProperties.name.x == "Iron Banner") |>
     filter(lubridate::year(date) >= pvp_range) |>
     ggplot(aes(x=date, y=as.numeric(kda), color=standing, size=score)) +
       geom_hline(yintercept = 1.0, color="#ffffff") +
@@ -574,6 +587,41 @@ pvp1
 pvp2
 
 pvp3
+
+```
+
+
+```{r}
+#| eval: true
+#| echo: true
+# Iron Banner, Heresy Act I
+
+iron_banner <- pvp_games |>
+  filter(date >= as.Date("2025-02-01") &
+         date < as.Date("2025-02-28") &
+         grepl("Iron Banner", displayProperties.name.x)
+         ) 
+
+iron_banner |> ungroup() |> summarise(n=n(), .by=c("standing", "characterClass"))
+
+```
+
+```{r}
+#| eval: true
+
+if (nrow(iron_banner) > 0) {
+
+iron_banner |>
+  ggplot(aes(x=date, y=as.numeric(kda), color=standing, size=score)) +
+    geom_hline(yintercept = 1, color="white") +
+    geom_quasirandom( varwidth = TRUE, width=.3, orientation = "x", alpha=.7) +
+    facet_wrap(~characterClass) +
+  theme_solarized_2(light=FALSE, base_family = font_family) +
+  theme(legend.position = "none") +
+  labs(title = "Iron Banner - Heresy Act I",
+       caption = "Wins & Losses / Scaled by player score",
+       y = "KDA", x=NULL)
+}
 
 ```
 
@@ -611,6 +659,7 @@ pvp_games |>
 # another variation on IB info; this will show data by character for the first
 # IB of season 23
 
+if (nrow(pvp_games) > 0) {
 pvp_games |>
   filter(date >= as.Date("2023-12-01") &
          date < as.Date("2023-12-31") &
@@ -625,6 +674,9 @@ pvp_games |>
        subtitle = "Wins & Losses / Scaled by player score",
        caption = "The road to Gilded x 6",
        y = "KDA", x=NULL)
+
+}
+
 ```
 
 ```{r}
