@@ -22,6 +22,11 @@ processpgcrs.html
 README.html
 experiments.html
 experiments_files/
+PVP_dashboard.html
+PVP_dashboard_files/
+
+.quarto/
+settings.json
 
 
 
