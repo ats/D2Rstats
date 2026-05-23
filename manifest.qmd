@@ -72,16 +72,16 @@ if (newestManifest > latestStoredManifest) {
   items <- dbGetQuery(mdb, "select * from DestinyInventoryItemDefinition")
   itemsList <- items$json |> as_tbl_json() |> #spread_all() |> str()
     spread_values(itemType = jstring("itemTypeDisplayName"),
-                  hash = jstring("hash"),
+                  hash = jnumber("hash"),
                   itemName = jstring("displayProperties", "name"),
-                  equipmentSlotTypeHash = jstring("equippingBlock", "equipmentSlotTypeHash"),
+                  equipmentSlotTypeHash = jnumber("equippingBlock", "equipmentSlotTypeHash"),
                   tier = jstring("inventory", "tierTypeName"))
   
   buckets <- dbGetQuery(mdb, "select * from DestinyInventoryBucketDefinition")
   bucketsLabels <- buckets$json |> as_tbl_json() |>
     spread_values(bucketDescripton = jstring("displayProperties", "description"),
                   bucketName = jstring("displayProperties", "name"),
-                  bucketHash = jstring("hash"))
+                  bucketHash = jnumber("hash"))
   
   itemsListFinal <- itemsList |> left_join(bucketsLabels,
                                           by=c("equipmentSlotTypeHash"="bucketHash"))
