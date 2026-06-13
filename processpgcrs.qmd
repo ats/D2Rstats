@@ -284,7 +284,9 @@ levelPlayer |> filter(displayName=="") |> select(displayName, membershipId) |> u
 tic()
   levelPlayer |>
   unnest_wider(extended) |>
-  unnest_wider(values) |>
+  unnest_wider(values, names_repair = "universal") |>
+    select(-standing...194) |>
+    rename(standing = standing...7) |>
     raise("precisionKills", precision) |>
     raise("weaponKillsGrenade", grenade) |>
     raise("weaponKillsMelee", melee) |>
